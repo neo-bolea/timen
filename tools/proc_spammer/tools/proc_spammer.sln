@@ -1,0 +1,32 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.30114.105
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{911E67C6-3D85-4FCE-B560-20A9C3E3FF48}") = "proc_spammer", "..\build\proc_spammer.exe", "{8DB58A3A-41D8-45D1-8477-29E2683C2A65}"
+	ProjectSection(DebuggerProjectSystem) = preProject
+		PortSupplier = 00000000-0000-0000-0000-000000000000
+		Executable = C:\Users\neobo\Documents\Programming\C++\time_man\tools\proc_spammer\build\proc_spammer.exe
+		RemoteMachine = SAMSUNGSMARTTV1
+		StartingDirectory = C:\Users\neobo\Documents\Programming\C++\time_man\tools\proc_spammer\build
+		Environment = Default
+		LaunchingEngine = 00000000-0000-0000-0000-000000000000
+		UseLegacyDebugEngines = No
+		LaunchSQLEngine = No
+		AttachLaunchAction = No
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8DB58A3A-41D8-45D1-8477-29E2683C2A65}.Release|x64.ActiveCfg = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {BA61D262-26E6-42A2-8DFC-59451EE9D9BE}
+	EndGlobalSection
+EndGlobal
