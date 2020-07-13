@@ -2,6 +2,7 @@
 #include <Windows.h>
 #include <Psapi.h>
 
+#include <atomic>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
