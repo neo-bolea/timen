@@ -11,84 +11,215 @@ typedef int16_t i16;
 typedef int32_t i32;
 typedef int64_t i64;
 
-typedef uint8_t  ui8;
+typedef uint8_t ui8;
 typedef uint16_t ui16;
 typedef uint32_t ui32;
 typedef uint64_t ui64;
 
-#pragma function(memset)
-void* memset(void* Dst, i32 V, size_t Count)
-{
-	i8* Bytes = (i8*)Dst;
-	while (Count--)
-	{
-		*Bytes++ = (i8)V;
-	}
-	return Dst;
-}
+#define internal static;
+#define global static;
+#define persist static;
 
 #ifdef DEBUG
-#define assert(Expr) if(!(Expr)) { *(i32 *)0 = 0; }0
+#define assert(Expr) \
+	if(!(Expr))        \
+	{                  \
+		*(i32 *)0 = 0;   \
+	}                  \
+	0
 #else
-#define assert(Expr) Expr; 0
+#define assert(Expr) \
+	Expr;              \
+	0
 #endif
 #define ArrayLength(Array) (sizeof(Array) / sizeof(Array[0]))
-#define PrintError(){ char Error[255]; wsprintf(Error, "ERROR: %i\n", GetLastError()); OutputDebugString(Error); }0
+#define PrintError()                                \
+	{                                                 \
+		char Error[255];                                \
+		wsprintf(Error, "ERROR: %i\n", GetLastError()); \
+		OutputDebugString(Error);                       \
+	}                                                 \
+	0
 
-i32 StrLen(const char* Str)
+#define MAX(A, B) ((A) < (B)) ? (B) : (A)
+#define MIN(A, B) ((A) < (B)) ? (A) : (B)
+
+
+typedef enum eol_type
 {
-	const char* c = Str;
-	i32 Size = 0;
-	while (*c++)
-	{
-		Size++;
-	}
-	return Size;
+	LF,
+	CRLF,
+	CR,
+	EOL_UNDEFINED
+} eol_type;
+
+global eol_type EOLType = EOL_UNDEFINED;
+global char *EOLStr = "";
+global ui32 EOLLen = 0;
+
+void EOLCheck()
+{
+	assert(EOLType != EOL_UNDEFINED);
 }
 
-void StrCpy(char* Dst, const char* Src)
+void UpdateEOLType(const char *Str)
 {
-	const char* c = Src;
+	const char *C = strchr(Str, '\n');
+	if(C)
+	{
+		if(C > Str && (*(C - 1) == '\r'))
+		{
+			EOLType = CRLF;
+		}
+		else
+		{
+			EOLType = LF;
+		}
+	}
+	else
+	{
+		C = strchr(Str, '\r');
+		if(C)
+		{
+			EOLType = CR;
+		}
+		else
+		{
+			EOLType = LF;
+		}
+	}
+
+	switch(EOLType)
+	{
+		case LF:
+			EOLStr = "\n";
+			break;
+		case CRLF:
+			EOLStr = "\r\n";
+			break;
+		case CR:
+			EOLStr = "\r";
+			break;
+		default:
+			EOLStr = "";
+			break;
+	}
+	EOLLen = strlen(EOLStr);
+}
+
+bool IsEOLChar(char C)
+{
+	EOLCheck();
+	return ((EOLType == LF || EOLType == CRLF) && C == '\n') ||
+				 ((EOLType == CR || EOLType == CRLF) && C == '\r');
+}
+
+// Compares strings until EOL or end of string
+// EOLStr is the string that contains the new line character, Str is assumed to have no new line
+bool StrCmpEOL(const char *MulLineStr, const char *Str)
+{
+	EOLCheck();
+	while(*MulLineStr == *Str)
+	{
+		EOLStr++, Str++;
+		if(!*MulLineStr || IsEOLChar(*MulLineStr))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+ui32 EOLCount(const char *Str)
+{
+	EOLCheck();
+	ui32 Count = 0;
+	while(*Str)
+	{
+		if(IsEOLChar(*Str++))
+		{
+			Count++;
+			if(EOLType == CRLF)
+			{
+				Str++;
+			}
+		}
+	}
+	return Count;
+}
+
+char *AfterNextEOL(char *Str)
+{
+	EOLCheck();
 	do
 	{
-		*Dst++ = *c;
-	} while (*c++);
+		switch(EOLType)
+		{
+			case LF:
+			case CRLF:
+				if(*Str == '\n')
+				{
+					return Str + 1;
+				}
+				break;
+
+			case CR:
+				if(*Str == '\r')
+				{
+					return Str + 1;
+				}
+				break;
+		}
+	} while(*Str++);
+	return 0;
 }
 
-i32 StrCmpC(const char* A, const char* B, char EndChar)
+char *InsertEOL(char *Str)
 {
-	while (*A == EndChar && (*A == *B))
+	switch(EOLType)
 	{
-		A++, B++;
+		case LF:
+			*Str++ = '\n';
+			break;
+		case CRLF:
+			*Str++ = '\r';
+			*Str++ = '\n';
+			break;
+		case CR:
+			*Str++ = '\r';
+			break;
 	}
-	return *(const unsigned char*)A - *(const unsigned char*)B;
-}
-
-i32 StrCmp(const char* A, const char* B)
-{
-	return StrCmpC(A, B, '\0');
-}
-
-char* StrChr(char* Str, char Char)
-{
-	while (*Str != Char) { Str++; }
 	return Str;
 }
 
-int AToI(char* Str)
+void StrECpy(char *Dst, const char *Src, char EndChar)
 {
-	i32 Result = 0;
-	for (i32 i = 0; Str[i]; i++)
+	while(*Src && *Src != EndChar)
 	{
-		Result = Result * 10 + Str[i] - '0';
+		*Dst++ = *Src++;
 	}
-	return Result;
 }
 
-void main();
-void WinMainCRTStartup()
+ui32 StrCCount(const char *Str, char C)
 {
-	main();
+	ui32 Count = 0;
+	while(*Str)
+	{
+		if(*Str++ == C)
+		{
+			Count++;
+		}
+	}
+	return Count;
+}
+
+char *StrEnd(char *Str)
+{
+	while(*Str)
+	{
+		Str++;
+	}
+	return Str;
 }
 
 typedef struct process_symbol
@@ -100,143 +231,156 @@ typedef struct process_symbol
 
 typedef struct proc_sym_table
 {
-	process_symbol Symbols[32];
+	process_symbol Symbols[4];
 	HANDLE SymFile;
 	ui32 GUID;
-	ui32 SymbolCount;
 } proc_sym_table;
 
-void SerializeProcSym(char* Buf, process_symbol* Sym)
+global const ui32 NEW_SYM_ID = (ui32)-1;
+process_symbol AddSymToTable(proc_sym_table *Syms, const char *Str, ui64 Time, ui32 ID)
 {
-	wsprintf(Buf, "%s\n%i\n", Sym->Str, Sym->ID);
+	// Create the new symbol
+	process_symbol NewSym;
+	strcpy_s(NewSym.Str, ArrayLength(NewSym.Str), Str);
+	NewSym.ID = (ID == NEW_SYM_ID) ? Syms->GUID++ : ID;
+	NewSym.LastActive = Time;
+
+	// Find the oldest symbol, which we will overwrite
+	ui64 OldestTime = UINT64_MAX;
+	ui32 OldestIndex = 0;
+	for(ui32 i = 0; i < ArrayLength(Syms->Symbols); i++)
+	{
+		ui64 CurTime = Syms->Symbols[i].LastActive;
+		if(CurTime < OldestTime)
+		{
+			OldestTime = CurTime;
+			OldestIndex = i;
+		}
+	}
+	Syms->Symbols[OldestIndex] = NewSym;
+
+	return NewSym;
 }
 
-ui32 ProcessProcSym(proc_sym_table* Syms, const char* Str)
+ui32 ProcessProcSym(proc_sym_table *Syms, const char *Str)
 {
+	assert(*Str);
+
 	SYSTEMTIME SysTime;
 	FILETIME FileTime;
 	GetSystemTime(&SysTime);
 	assert(SystemTimeToFileTime(&SysTime, &FileTime));
 	ui64 Time = (ui64)FileTime.dwLowDateTime | ((ui64)FileTime.dwHighDateTime << 32);
 
-	for (ui32 i = 0; i < Syms->SymbolCount; i++)
+	for(ui32 i = 0; i < ArrayLength(Syms->Symbols); i++)
 	{
-		if (StrCmp(Syms->Symbols[i].Str, Str) == 0)
+		if(strcmp(Syms->Symbols[i].Str, Str) == 0)
 		{
 			Syms->Symbols[i].LastActive = Time;
 			return Syms->Symbols[i].ID;
 		}
 	}
 
-	// TODO NOW: Find process_symbol in file
-	assert(Syms->SymFile);
-	assert(SetFilePointer(Syms->SymFile, 0, 0, FILE_BEGIN));
-	LARGE_INTEGER FileSize;
+	// Try to find the symbol in the symbol file
+	assert(Syms->SymFile != INVALID_HANDLE_VALUE);
+	assert(SetFilePointer(Syms->SymFile, 0, 0, FILE_BEGIN) != INVALID_SET_FILE_POINTER);
+	LARGE_INTEGER FileSize64;
 	DWORD BytesRead;
-	GetFileSizeEx(Syms->SymFile, &FileSize);
-	assert(FileSize.QuadPart < UINT32_MAX);
-	char* FileBuf = VirtualAlloc(0, FileSize.QuadPart, MEM_RESERVE | MEM_COMMIT, 0);
-	assert(ReadFile(Syms->SymFile, FileBuf, (ui32)FileSize.QuadPart, &BytesRead, 0) && BytesRead == (ui32)FileSize.QuadPart);
-	char* FilePos = FileBuf;
-	while (true)
+	assert(GetFileSizeEx(Syms->SymFile, &FileSize64));
+	assert(FileSize64.QuadPart < UINT32_MAX);
+	ui32 FileSize = (ui32)FileSize64.QuadPart;
+	ui32 ID = 0;
+	if(FileSize)
 	{
-		if (StrCmpC(Str, FilePos, '\n') == 0)
+		char *FileBuf = VirtualAlloc(0, FileSize + 1, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+		assert(FileBuf);
+		assert(ReadFile(Syms->SymFile, FileBuf, FileSize, &BytesRead, 0) && BytesRead == FileSize);
+		FileBuf[FileSize] = '\0';
+		char *FilePos = FileBuf;
+		while(true)
 		{
-			char IDBuf[32];
-			StrCpy(IDBuf, FilePos);
-			return AToI(IDBuf);
-		}
+			if(StrCmpEOL(FilePos, Str))
+			{
+				AddSymToTable(Syms, Str, Time, ID);
+				return ID;
+			}
 
-		for (ui32 i = 0; i < 2; i++)
-		{
-			FilePos = StrChr(FilePos, '\n') + 1;
-			if (!FilePos) { break; }
+			FilePos = AfterNextEOL(FilePos);
+			if(!FilePos)
+			{
+				break;
+			}
+			ID++;
 		}
+		VirtualFree(FileBuf, FileSize, MEM_RELEASE);
 	}
-	VirtualFree(FileBuf, FileSize.QuadPart, MEM_RELEASE);
 
 	// THe symbol doesn't exist yet, create it
 	{
-		// Find the oldest symbol, which we will overwrite
-		ui64 OldestTime = UINT64_MAX;
-		ui32 OldestIndex = 0;
-		for (ui32 i = 0; i < Syms->SymbolCount; i++)
-		{
-			ui64 CurTime = Syms->Symbols[i].LastActive;
-			if (CurTime < OldestTime)
-			{
-				OldestTime = CurTime;
-				OldestIndex = i;
-			}
-		}
-
-		// Overwrite the oldest symbol
-		process_symbol NewSym;
-		StrCpy(NewSym.Str, Str);
-		NewSym.ID = Syms->GUID++;
-		Syms->Symbols[OldestIndex] = NewSym;
+		process_symbol NewSym = AddSymToTable(Syms, Str, Time, NEW_SYM_ID);
 
 		// Write the new symbol to the file
-		char NewSymBuf[512];
-		SerializeProcSym(NewSymBuf, &NewSym);
 		DWORD BytesWritten;
-		i32 NewSymBufLen = StrLen(NewSymBuf);
-		SetFilePointer(Syms->SymFile, 0, 0, FILE_END);
-		assert(WriteFile(Syms->SymFile, NewSymBuf, NewSymBufLen, &BytesWritten, 0));
+		char *SymBufEnd = StrEnd(NewSym.Str);
+		SymBufEnd = InsertEOL(SymBufEnd);
+		*SymBufEnd = '\0';
+		ui32 NewSymBufLen = SymBufEnd - NewSym.Str;
+		assert(SetFilePointer(Syms->SymFile, 0, 0, FILE_END) != INVALID_SET_FILE_POINTER);
+		assert(WriteFile(Syms->SymFile, NewSym.Str, NewSymBufLen, &BytesWritten, 0));
 		assert((i32)BytesWritten == NewSymBufLen);
 
 		return NewSym.ID;
 	}
 }
 
-void main()
+int __stdcall WinMain(HINSTANCE hInstance,
+											HINSTANCE hPrevInstance,
+											LPSTR lpCmdLine,
+											int nShowCmd)
 {
-	int i = 1;
-	STARTUPINFO StartUpInfo;
-	PROCESS_INFORMATION ProcInfo;
-	char* Args = " 10 1000";
-	if (!CreateProcess(".\\proc_spammer.exe",
-		Args,
-		0,
-		0,
-		false,
-		CREATE_NEW_CONSOLE,
-		0,
-		0,
-		&StartUpInfo,
-		&ProcInfo))
-	{
-		int Err = GetLastError();
-		Err = Err;
-	}
-
-	while (true) {}
-	if (++i)
-	{
-		return;
-	}
-
 	CreateDirectory("..\\data", 0);
 	assert(SetCurrentDirectory("..\\data"));
 
 	proc_sym_table Symbols;
+	// By filling with zero we assure that unused symbol slots will be overwritten (since they will have a timestamp of 0, the oldest number)
 	memset(&Symbols, 0, sizeof(proc_sym_table));
 
 	const i32 SleepS = 1;
 	const i32 InactivityThreshS = 2;
-	char* LogFilename = "Log.txt";
-	char* SymFilename = "Log.sym";
-	HANDLE LogFile = CreateFile(LogFilename, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+	char *LogFilename = "Log.txt";
+	char *SymFilename = "Log.sym";
+	HANDLE LogFile = CreateFile(LogFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	assert(LogFile != INVALID_HANDLE_VALUE);
 
-	Symbols.SymFile = CreateFile(SymFilename, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+	// TODO NOW: check that both files have same EOL type
+	Symbols.SymFile = CreateFile(SymFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	assert(Symbols.SymFile != INVALID_HANDLE_VALUE);
+	{
+		LARGE_INTEGER FileSize64;
+		DWORD BytesRead;
+		assert(GetFileSizeEx(Symbols.SymFile, &FileSize64));
+		ui32 FileSize = (ui32)FileSize64.QuadPart;
+		char *FileBuf = VirtualAlloc(0, FileSize + 2, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+		assert(ReadFile(Symbols.SymFile, FileBuf, FileSize, &BytesRead, 0) && BytesRead == FileSize);
+
+		UpdateEOLType(FileBuf);
+		// File should always end with a new line.
+		// TODO NOW: Do the same for log file
+		if(!IsEOLChar(FileBuf[FileSize - 1]))
+		{
+			DWORD BytesWritten;
+			assert(WriteFile(Symbols.SymFile, EOLStr, EOLLen, &BytesWritten, 0) && BytesWritten == EOLLen);
+		}
+		Symbols.GUID = EOLCount(FileBuf);
+
+		VirtualFree(FileBuf, FileSize, MEM_RELEASE);
+	}
 
 	DWORD PrevLastInput = 0;
 	ui64 LastInputTime = 0;
 
-	i32 Iterations = 10;
-	while (Iterations--)
+	i32 Iterations = 100;
+	while(Iterations--)
 	{
 		Sleep(SleepS * 1000);
 
@@ -245,9 +389,9 @@ void main()
 		bool Failed = false;
 
 		// By not directly using LastInputInfo's time, only comparing to it, we prevent overflow problems for i32.
-		LASTINPUTINFO LastInputInfo = { sizeof(LASTINPUTINFO), 0 };
+		LASTINPUTINFO LastInputInfo = {sizeof(LASTINPUTINFO), 0};
 		assert(GetLastInputInfo(&LastInputInfo));
-		if (PrevLastInput != LastInputInfo.dwTime)
+		if(PrevLastInput != LastInputInfo.dwTime)
 		{
 			PrevLastInput = LastInputInfo.dwTime;
 			LastInputTime = SleepS;
@@ -257,44 +401,56 @@ void main()
 			LastInputTime += SleepS;
 		}
 
-		if (LastInputTime >= InactivityThreshS)
+		if(LastInputTime >= InactivityThreshS)
 		{
-			StrCpy(ProgInfo, "Idle\n");
-			ProgInfoLen = StrLen(ProgInfo);
+			strcpy_s(ProgInfo, ArrayLength(ProgInfo), "Idle\n");
+			ProgInfoLen = strlen(ProgInfo);
 		}
 		else
 		{
 			HWND ActiveWin = GetForegroundWindow();
-			if (ActiveWin)
+			if(ActiveWin)
 			{
-				char ProcName[MAX_PATH] = "\0";
+				char ProcNameBuf[MAX_PATH] = "\0";
+				char *ProcName = 0;
 				char Title[MAX_PATH] = "\0";
 				ui32 TitleLen = 0, ProcNameLen = 0;
 				DWORD ProcID;
 
 				GetWindowThreadProcessId(ActiveWin, &ProcID);
-				if (ProcID)
+				if(ProcID)
 				{
 					HANDLE FGProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, ProcID);
-					if (FGProc)
+					if(FGProc)
 					{
-						ProcNameLen = GetModuleBaseName(FGProc, 0, ProcName, ArrayLength(ProcName));
-						if (!ProcNameLen)
+						ProcNameLen = GetProcessImageFileName(FGProc, ProcNameBuf, ArrayLength(ProcNameBuf));
+
+						if(!ProcNameLen)
 						{
-							*ProcName = 0;
-							Failed = true;
+							*ProcNameBuf = 0;
+						}
+						else
+						{
+							ProcName = strrchr(ProcNameBuf, '\\') + 1;
 						}
 					}
 				}
 
-				TitleLen = GetWindowText(ActiveWin, Title, ArrayLength(Title));
 
-				if (*Title && *ProcName)
+				if(*ProcNameBuf)
 				{
-					i32 SymValue = ProcessProcSym(&Symbols, ProcName);
-					wsprintf(ProgInfo, "%s\n%i (%s)\n", Title, SymValue, ProcName);
-					//wsprintf(ProgInfo, "%s\n%s\n", Title, ProcName);
-					ProgInfoLen = StrLen(ProgInfo);
+					TitleLen = GetWindowText(ActiveWin, Title, ArrayLength(Title));
+
+					if(*Title)
+					{
+						i32 SymValue = ProcessProcSym(&Symbols, ProcName);
+						wsprintf(ProgInfo, "%s%s%i (%s)%s", Title, EOLStr, SymValue, ProcName, EOLStr);
+						ProgInfoLen = strlen(ProgInfo);
+					}
+					else
+					{
+						Failed = true;
+					}
 				}
 				else
 				{
@@ -303,11 +459,14 @@ void main()
 			}
 		}
 
-		if (!Failed)
+		// TODO: Only write to file if process name or title changed, otherwise increase a counter.
+		if(!Failed)
 		{
 			assert(ProgInfoLen < ArrayLength(ProgInfo) + 1);
-			ProgInfo[ProgInfoLen++] = '\n';
-			ProgInfo[ProgInfoLen] = '\0';
+			char *ProgInfoEnd = ProgInfo + ProgInfoLen;
+			ProgInfoEnd = InsertEOL(ProgInfoEnd);
+			*ProgInfoEnd = '\0';
+			ProgInfoLen = ProgInfoEnd - ProgInfo;
 
 			DWORD BytesWritten;
 			assert(WriteFile(LogFile, ProgInfo, ProgInfoLen, &BytesWritten, 0));
@@ -318,20 +477,5 @@ void main()
 
 	assert(CloseHandle(LogFile));
 
-	//{
-
-	//
-	//	i32 Index;
-	//	proc_sym_table* Syms = &Symbols;
-	//	IterateChunks(Syms, Index,
-	//		{
-	//			DWORD BytesWritten;
-	//			i32 SymLen = StrLen(Syms->Symbols[Index]);
-	//			Syms->Symbols[Index][SymLen++] = '\n';
-	//			assert(WriteFile(SymbolFile, Syms->Symbols[Index], SymLen, &BytesWritten, 0));
-	//			assert((i32)BytesWritten == SymLen);
-	//		});
-	//
-	//	assert(CloseHandle(SymbolFile));
-	//}
+	return 0;
 }

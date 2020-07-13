@@ -1,6 +1,7 @@
 @echo off
 
 call initvcvars.bat
+mkdir ..\build
 pushd ..\build
-cl ..\src\timen.c -Fetimen.exe -DDEBUG -D_CRT_SECURE_NO_WARNINGS -TC -W4 -WX -wd4189 -MD -Z7 -GR- -EHa- -GS- -Gs9999999 -nologo /link User32.lib Kernel32.lib -nodefaultlib -opt:ref -SubSystem:Windows -stack:0x100000,0x100000
+cl ..\src\timen.c -Fetimen.exe -DDEBUG -Z7 -MD -W4 -WX -wd4091 -wd4100 -wd4189 -GS- -nologo /link User32.lib Kernel32.lib -SubSystem:Windows
 popd

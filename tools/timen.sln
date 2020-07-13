@@ -1,14 +1,14 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 16
-VisualStudioVersion = 16.0.30114.105
+VisualStudioVersion = 16.0.30011.22
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{911E67C6-3D85-4FCE-B560-20A9C3E3FF48}") = "timen", "..\build\timen.exe", "{71E61872-A62D-46F9-80BA-B7BC70CDD29D}"
+Project("{911E67C6-3D85-4FCE-B560-20A9C3E3FF48}") = "timen", "..\build\timen.exe", "{1C9665CE-C2C9-42D1-BA33-AE6F59B032FD}"
 	ProjectSection(DebuggerProjectSystem) = preProject
 		PortSupplier = 00000000-0000-0000-0000-000000000000
-		Executable = C:\Users\neobo\Documents\Programming\C++\timen\build\timen.exe
-		RemoteMachine = SAMSUNGSMARTTV1
-		StartingDirectory = C:\Users\neobo\Documents\Programming\C++\timen\build
+		Executable = P:\C++\timen\build\timen.exe
+		RemoteMachine = DESKTOP-E2EB5QE
+		StartingDirectory = P:\C++\timen\build
 		Environment = Default
 		LaunchingEngine = 00000000-0000-0000-0000-000000000000
 		UseLegacyDebugEngines = No
@@ -21,12 +21,12 @@ Global
 		Release|x64 = Release|x64
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{71E61872-A62D-46F9-80BA-B7BC70CDD29D}.Release|x64.ActiveCfg = Release|x64
+		{1C9665CE-C2C9-42D1-BA33-AE6F59B032FD}.Release|x64.ActiveCfg = Release|x86
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {3EC81A39-9B5D-4C28-B24C-982C09EB41CF}
+		SolutionGuid = {4F2343E2-E4CB-4536-A496-D1D6A8555EB6}
 	EndGlobalSection
 EndGlobal

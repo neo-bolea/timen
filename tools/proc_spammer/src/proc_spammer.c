@@ -27,8 +27,8 @@ int main(int argc, char** argv)
 	if (!ProcCount || !SleepMS)
 	{
 #ifdef DEBUG
-		ProcCount = 20;
-		SleepMS = 200;
+		ProcCount = 30;
+		SleepMS = 1000;
 #else
 		printf("Usage: [ProcCount] [SleepMS]");
 		return;
