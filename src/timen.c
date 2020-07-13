@@ -94,18 +94,18 @@ void EOLCheck()
 	assert(EOLType != EOL_UNDEFINED);
 }
 
-void UpdateEOLType(const char *Str)
+eol_type GetStrEOLType(const char *Str)
 {
 	const char *C = strchr(Str, '\n');
 	if(C)
 	{
 		if(C > Str && (*(C - 1) == '\r'))
 		{
-			EOLType = CRLF;
+			return CRLF;
 		}
 		else
 		{
-			EOLType = LF;
+			return LF;
 		}
 	}
 	else
@@ -113,14 +113,18 @@ void UpdateEOLType(const char *Str)
 		C = strchr(Str, '\r');
 		if(C)
 		{
-			EOLType = CR;
+			return CR;
 		}
 		else
 		{
-			EOLType = LF;
+			return LF;
 		}
 	}
+}
 
+void UpdateEOLType(const char *Str)
+{
+	EOLType = GetStrEOLType(Str);
 	switch(EOLType)
 	{
 		case LF:
@@ -376,23 +380,54 @@ int __stdcall WinMain(HINSTANCE hInstance,
 	// TODO NOW: check that both files have same EOL type
 	Symbols.SymFile = CreateFile(SymFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	assert(Symbols.SymFile != INVALID_HANDLE_VALUE);
+
 	{
 		ui32 FileSize = GetFileSize32(Symbols.SymFile);
-		char *FileBuf = VirtualAlloc(0, FileSize + EOLLen, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-		DWORD BytesRead;
-		assert(ReadFile(Symbols.SymFile, FileBuf, FileSize, &BytesRead, 0) && BytesRead == FileSize);
-
-		UpdateEOLType(FileBuf);
-		// File should always end with a new line.
-		// TODO NOW: Do the same for log file
-		if(FileSize && !IsEOLChar(FileBuf[FileSize - 1]))
+		if(FileSize)
 		{
-			DWORD BytesWritten;
-			assert(WriteFile(Symbols.SymFile, EOLStr, EOLLen, &BytesWritten, 0) && BytesWritten == EOLLen);
-		}
-		Symbols.GUID = EOLCount(FileBuf);
+			char *FileBuf = VirtualAlloc(0, FileSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+			DWORD BytesRead;
+			assert(ReadFile(Symbols.SymFile, FileBuf, FileSize, &BytesRead, 0) && BytesRead == FileSize);
 
-		VirtualFree(FileBuf, FileSize, MEM_RELEASE);
+			UpdateEOLType(FileBuf);
+			// File should always end with a new line.
+			if(!IsEOLChar(FileBuf[FileSize - 1]))
+			{
+				DWORD BytesWritten;
+				assert(WriteFile(Symbols.SymFile, EOLStr, EOLLen, &BytesWritten, 0) && BytesWritten == EOLLen);
+				Symbols.GUID = EOLCount(FileBuf);
+			}
+
+			VirtualFree(FileBuf, FileSize, MEM_RELEASE);
+		}
+	}
+
+	{
+		const ui32 MaxSizeToRead = 510;
+
+		ui32 FileSize = GetFileSize32(LogFile);
+		if(FileSize)
+		{
+			i32 ToRead = MIN(MaxSizeToRead, FileSize);
+
+			DWORD FilePtrRes = SetFilePointer(LogFile, -ToRead, 0, FILE_END);
+			assert(FilePtrRes != INVALID_SET_FILE_POINTER && FilePtrRes != ERROR_NEGATIVE_SEEK);
+
+			DWORD BytesRead;
+			char *FileBuf = VirtualAlloc(0, ToRead, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+			assert(ReadFile(LogFile, FileBuf, ToRead, &BytesRead, 0) && (i32)BytesRead == ToRead);
+
+			// Both files must have the same EOL encoding.
+			assert(GetStrEOLType(FileBuf) == EOLType);
+			// File should always end with a new line.
+			if(!IsEOLChar(FileBuf[ToRead - 1]))
+			{
+				DWORD BytesWritten;
+				assert(WriteFile(LogFile, EOLStr, EOLLen, &BytesWritten, 0) && BytesWritten == EOLLen);
+			}
+
+			VirtualFree(FileBuf, ToRead, MEM_RELEASE);
+		}
 	}
 
 	DWORD PrevLastInput = 0;
@@ -462,7 +497,7 @@ int __stdcall WinMain(HINSTANCE hInstance,
 					if(*Title)
 					{
 						ui32 SymValue = ProcessProcSym(&Symbols, ProcName);
-						wsprintf(ProgInfo, "%s%s%i (%s)%s", Title, EOLStr, SymValue, ProcName, EOLStr);
+						//wsprintf(ProgInfo, "%s%s%i for %is (%s)%s", Title, EOLStr, SymValue, ProcDuration, ProcName, EOLStr);
 						ProgInfoLen = strlen(ProgInfo);
 
 						ui32 FileValue = FindSymbolInFile(&Symbols, ProcName);
