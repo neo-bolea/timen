@@ -44,7 +44,39 @@ typedef uint64_t ui64;
 #define MAX(A, B) ((A) < (B)) ? (B) : (A)
 #define MIN(A, B) ((A) < (B)) ? (A) : (B)
 
+#pragma region String Helpers
+void StrECpy(char *Dst, const char *Src, char EndChar)
+{
+	while(*Src && *Src != EndChar)
+	{
+		*Dst++ = *Src++;
+	}
+}
 
+ui32 StrCCount(const char *Str, char C)
+{
+	ui32 Count = 0;
+	while(*Str)
+	{
+		if(*Str++ == C)
+		{
+			Count++;
+		}
+	}
+	return Count;
+}
+
+char *StrEnd(char *Str)
+{
+	while(*Str)
+	{
+		Str++;
+	}
+	return Str;
+}
+#pragma endregion
+
+#pragma region EOL
 typedef enum eol_type
 {
 	LF,
@@ -121,7 +153,7 @@ bool StrCmpEOL(const char *MulLineStr, const char *Str)
 	EOLCheck();
 	while(*MulLineStr == *Str)
 	{
-		EOLStr++, Str++;
+		MulLineStr++, Str++;
 		if(!*MulLineStr || IsEOLChar(*MulLineStr))
 		{
 			return true;
@@ -191,35 +223,14 @@ char *InsertEOL(char *Str)
 	}
 	return Str;
 }
+#pragma endregion
 
-void StrECpy(char *Dst, const char *Src, char EndChar)
+ui32 GetFileSize32(HANDLE File)
 {
-	while(*Src && *Src != EndChar)
-	{
-		*Dst++ = *Src++;
-	}
-}
-
-ui32 StrCCount(const char *Str, char C)
-{
-	ui32 Count = 0;
-	while(*Str)
-	{
-		if(*Str++ == C)
-		{
-			Count++;
-		}
-	}
-	return Count;
-}
-
-char *StrEnd(char *Str)
-{
-	while(*Str)
-	{
-		Str++;
-	}
-	return Str;
+	LARGE_INTEGER FileSize64;
+	assert(GetFileSizeEx(File, &FileSize64));
+	assert(FileSize64.QuadPart < UINT32_MAX);
+	return (ui32)FileSize64.QuadPart;
 }
 
 typedef struct process_symbol
@@ -236,7 +247,42 @@ typedef struct proc_sym_table
 	ui32 GUID;
 } proc_sym_table;
 
-global const ui32 NEW_SYM_ID = (ui32)-1;
+ui32 FindSymbolInFile(proc_sym_table *Syms, const char *Str)
+{
+	assert(Syms->SymFile != INVALID_HANDLE_VALUE);
+	ui32 FileSize = GetFileSize32(Syms->SymFile);
+	if(FileSize)
+	{
+		char *FileBuf = VirtualAlloc(0, FileSize + 1, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+		assert(FileBuf);
+
+		assert(SetFilePointer(Syms->SymFile, 0, 0, FILE_BEGIN) != INVALID_SET_FILE_POINTER);
+		DWORD BytesRead;
+		assert(ReadFile(Syms->SymFile, FileBuf, FileSize, &BytesRead, 0) && BytesRead == FileSize);
+		FileBuf[FileSize] = '\0';
+
+		char *FilePos = FileBuf;
+		ui32 ID = 0;
+		while(true)
+		{
+			if(StrCmpEOL(FilePos, Str))
+			{
+				return ID;
+			}
+
+			FilePos = AfterNextEOL(FilePos);
+			if(!FilePos)
+			{
+				break;
+			}
+			ID++;
+		}
+		VirtualFree(FileBuf, FileSize, MEM_RELEASE);
+	}
+	return UINT32_MAX;
+}
+
+global const ui32 NEW_SYM_ID = UINT32_MAX;
 process_symbol AddSymToTable(proc_sym_table *Syms, const char *Str, ui64 Time, ui32 ID)
 {
 	// Create the new symbol
@@ -282,37 +328,11 @@ ui32 ProcessProcSym(proc_sym_table *Syms, const char *Str)
 	}
 
 	// Try to find the symbol in the symbol file
-	assert(Syms->SymFile != INVALID_HANDLE_VALUE);
-	assert(SetFilePointer(Syms->SymFile, 0, 0, FILE_BEGIN) != INVALID_SET_FILE_POINTER);
-	LARGE_INTEGER FileSize64;
-	DWORD BytesRead;
-	assert(GetFileSizeEx(Syms->SymFile, &FileSize64));
-	assert(FileSize64.QuadPart < UINT32_MAX);
-	ui32 FileSize = (ui32)FileSize64.QuadPart;
-	ui32 ID = 0;
-	if(FileSize)
+	ui32 FileID = FindSymbolInFile(Syms, Str);
+	if(FileID != UINT32_MAX)
 	{
-		char *FileBuf = VirtualAlloc(0, FileSize + 1, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-		assert(FileBuf);
-		assert(ReadFile(Syms->SymFile, FileBuf, FileSize, &BytesRead, 0) && BytesRead == FileSize);
-		FileBuf[FileSize] = '\0';
-		char *FilePos = FileBuf;
-		while(true)
-		{
-			if(StrCmpEOL(FilePos, Str))
-			{
-				AddSymToTable(Syms, Str, Time, ID);
-				return ID;
-			}
-
-			FilePos = AfterNextEOL(FilePos);
-			if(!FilePos)
-			{
-				break;
-			}
-			ID++;
-		}
-		VirtualFree(FileBuf, FileSize, MEM_RELEASE);
+		AddSymToTable(Syms, Str, Time, FileID);
+		return FileID;
 	}
 
 	// THe symbol doesn't exist yet, create it
@@ -338,8 +358,9 @@ int __stdcall WinMain(HINSTANCE hInstance,
 											LPSTR lpCmdLine,
 											int nShowCmd)
 {
-	CreateDirectory("..\\data", 0);
-	assert(SetCurrentDirectory("..\\data"));
+	const char *DataDir = "..\\data";
+	CreateDirectory(DataDir, 0);
+	assert(SetCurrentDirectory(DataDir));
 
 	proc_sym_table Symbols;
 	// By filling with zero we assure that unused symbol slots will be overwritten (since they will have a timestamp of 0, the oldest number)
@@ -356,17 +377,15 @@ int __stdcall WinMain(HINSTANCE hInstance,
 	Symbols.SymFile = CreateFile(SymFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	assert(Symbols.SymFile != INVALID_HANDLE_VALUE);
 	{
-		LARGE_INTEGER FileSize64;
+		ui32 FileSize = GetFileSize32(Symbols.SymFile);
+		char *FileBuf = VirtualAlloc(0, FileSize + EOLLen, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 		DWORD BytesRead;
-		assert(GetFileSizeEx(Symbols.SymFile, &FileSize64));
-		ui32 FileSize = (ui32)FileSize64.QuadPart;
-		char *FileBuf = VirtualAlloc(0, FileSize + 2, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 		assert(ReadFile(Symbols.SymFile, FileBuf, FileSize, &BytesRead, 0) && BytesRead == FileSize);
 
 		UpdateEOLType(FileBuf);
 		// File should always end with a new line.
 		// TODO NOW: Do the same for log file
-		if(!IsEOLChar(FileBuf[FileSize - 1]))
+		if(FileSize && !IsEOLChar(FileBuf[FileSize - 1]))
 		{
 			DWORD BytesWritten;
 			assert(WriteFile(Symbols.SymFile, EOLStr, EOLLen, &BytesWritten, 0) && BytesWritten == EOLLen);
@@ -424,7 +443,6 @@ int __stdcall WinMain(HINSTANCE hInstance,
 					if(FGProc)
 					{
 						ProcNameLen = GetProcessImageFileName(FGProc, ProcNameBuf, ArrayLength(ProcNameBuf));
-
 						if(!ProcNameLen)
 						{
 							*ProcNameBuf = 0;
@@ -443,9 +461,12 @@ int __stdcall WinMain(HINSTANCE hInstance,
 
 					if(*Title)
 					{
-						i32 SymValue = ProcessProcSym(&Symbols, ProcName);
+						ui32 SymValue = ProcessProcSym(&Symbols, ProcName);
 						wsprintf(ProgInfo, "%s%s%i (%s)%s", Title, EOLStr, SymValue, ProcName, EOLStr);
 						ProgInfoLen = strlen(ProgInfo);
+
+						ui32 FileValue = FindSymbolInFile(&Symbols, ProcName);
+						assert(FileValue == SymValue);
 					}
 					else
 					{
@@ -469,6 +490,7 @@ int __stdcall WinMain(HINSTANCE hInstance,
 			ProgInfoLen = ProgInfoEnd - ProgInfo;
 
 			DWORD BytesWritten;
+			assert(SetFilePointer(LogFile, 0, 0, FILE_END) != INVALID_SET_FILE_POINTER);
 			assert(WriteFile(LogFile, ProgInfo, ProgInfoLen, &BytesWritten, 0));
 			assert(BytesWritten == ProgInfoLen);
 			OutputDebugString(ProgInfo);
