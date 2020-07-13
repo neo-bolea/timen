@@ -85,76 +85,19 @@ typedef enum eol_type
 	EOL_UNDEFINED
 } eol_type;
 
-global eol_type EOLType = EOL_UNDEFINED;
-global char *EOLStr = "";
-global ui32 EOLLen = 0;
-
-void EOLCheck()
-{
-	assert(EOLType != EOL_UNDEFINED);
-}
-
-eol_type GetStrEOLType(const char *Str)
-{
-	const char *C = strchr(Str, '\n');
-	if(C)
-	{
-		if(C > Str && (*(C - 1) == '\r'))
-		{
-			return CRLF;
-		}
-		else
-		{
-			return LF;
-		}
-	}
-	else
-	{
-		C = strchr(Str, '\r');
-		if(C)
-		{
-			return CR;
-		}
-		else
-		{
-			return LF;
-		}
-	}
-}
-
-void UpdateEOLType(const char *Str)
-{
-	EOLType = GetStrEOLType(Str);
-	switch(EOLType)
-	{
-		case LF:
-			EOLStr = "\n";
-			break;
-		case CRLF:
-			EOLStr = "\r\n";
-			break;
-		case CR:
-			EOLStr = "\r";
-			break;
-		default:
-			EOLStr = "";
-			break;
-	}
-	EOLLen = strlen(EOLStr);
-}
+global const eol_type EOLType = LF;
+global const char *EOLStr = "\n";
+global const ui32 EOLLen = 1;
 
 bool IsEOLChar(char C)
 {
-	EOLCheck();
-	return ((EOLType == LF || EOLType == CRLF) && C == '\n') ||
-				 ((EOLType == CR || EOLType == CRLF) && C == '\r');
+	return C == '\n';
 }
 
 // Compares strings until EOL or end of string
 // EOLStr is the string that contains the new line character, Str is assumed to have no new line
 bool StrCmpEOL(const char *MulLineStr, const char *Str)
 {
-	EOLCheck();
 	while(*MulLineStr == *Str)
 	{
 		MulLineStr++, Str++;
@@ -168,43 +111,21 @@ bool StrCmpEOL(const char *MulLineStr, const char *Str)
 
 ui32 EOLCount(const char *Str)
 {
-	EOLCheck();
 	ui32 Count = 0;
 	while(*Str)
 	{
-		if(IsEOLChar(*Str++))
-		{
-			Count++;
-			if(EOLType == CRLF)
-			{
-				Str++;
-			}
-		}
+		Count += IsEOLChar(*Str++);
 	}
 	return Count;
 }
 
 char *AfterNextEOL(char *Str)
 {
-	EOLCheck();
 	do
 	{
-		switch(EOLType)
+		if(*Str == '\n')
 		{
-			case LF:
-			case CRLF:
-				if(*Str == '\n')
-				{
-					return Str + 1;
-				}
-				break;
-
-			case CR:
-				if(*Str == '\r')
-				{
-					return Str + 1;
-				}
-				break;
+			return Str + 1;
 		}
 	} while(*Str++);
 	return 0;
@@ -212,19 +133,7 @@ char *AfterNextEOL(char *Str)
 
 char *InsertEOL(char *Str)
 {
-	switch(EOLType)
-	{
-		case LF:
-			*Str++ = '\n';
-			break;
-		case CRLF:
-			*Str++ = '\r';
-			*Str++ = '\n';
-			break;
-		case CR:
-			*Str++ = '\r';
-			break;
-	}
+	*Str++ = '\n';
 	return Str;
 }
 #pragma endregion
@@ -257,7 +166,7 @@ ui32 FindSymbolInFile(proc_sym_table *Syms, const char *Str)
 	ui32 FileSize = GetFileSize32(Syms->SymFile);
 	if(FileSize)
 	{
-		char *FileBuf = VirtualAlloc(0, FileSize + 1, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+		char *FileBuf = (char *)VirtualAlloc(0, FileSize + 1, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 		assert(FileBuf);
 
 		assert(SetFilePointer(Syms->SymFile, 0, 0, FILE_BEGIN) != INVALID_SET_FILE_POINTER);
@@ -357,12 +266,16 @@ ui32 ProcessProcSym(proc_sym_table *Syms, const char *Str)
 	}
 }
 
+bool ExitRoutine(DWORD CtrlType);
+
 int __stdcall WinMain(HINSTANCE hInstance,
 											HINSTANCE hPrevInstance,
 											LPSTR lpCmdLine,
 											int nShowCmd)
 {
-	const char *DataDir = "..\\data";
+	//SetConsoleCtrlHandler(&ExitRoutine, true);
+
+			const char *DataDir = "..\\data";
 	CreateDirectory(DataDir, 0);
 	assert(SetCurrentDirectory(DataDir));
 
@@ -374,59 +287,26 @@ int __stdcall WinMain(HINSTANCE hInstance,
 	const i32 InactivityThreshS = 2;
 	char *LogFilename = "Log.txt";
 	char *SymFilename = "Log.sym";
+	assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_NORMAL));
 	HANDLE LogFile = CreateFile(LogFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	assert(LogFile != INVALID_HANDLE_VALUE);
 
-	// TODO NOW: check that both files have same EOL type
+	assert(SetFileAttributes(SymFilename, FILE_ATTRIBUTE_NORMAL));
 	Symbols.SymFile = CreateFile(SymFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	assert(Symbols.SymFile != INVALID_HANDLE_VALUE);
 
+	// Count the amount of symbols that are currently stored, to correctly set the GUID
 	{
 		ui32 FileSize = GetFileSize32(Symbols.SymFile);
 		if(FileSize)
 		{
-			char *FileBuf = VirtualAlloc(0, FileSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+			char *FileBuf = (char *)VirtualAlloc(0, FileSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 			DWORD BytesRead;
 			assert(ReadFile(Symbols.SymFile, FileBuf, FileSize, &BytesRead, 0) && BytesRead == FileSize);
 
-			UpdateEOLType(FileBuf);
-			// File should always end with a new line.
-			if(!IsEOLChar(FileBuf[FileSize - 1]))
-			{
-				DWORD BytesWritten;
-				assert(WriteFile(Symbols.SymFile, EOLStr, EOLLen, &BytesWritten, 0) && BytesWritten == EOLLen);
-				Symbols.GUID = EOLCount(FileBuf);
-			}
+			Symbols.GUID = EOLCount(FileBuf);
 
 			VirtualFree(FileBuf, FileSize, MEM_RELEASE);
-		}
-	}
-
-	{
-		const ui32 MaxSizeToRead = 510;
-
-		ui32 FileSize = GetFileSize32(LogFile);
-		if(FileSize)
-		{
-			i32 ToRead = MIN(MaxSizeToRead, FileSize);
-
-			DWORD FilePtrRes = SetFilePointer(LogFile, -ToRead, 0, FILE_END);
-			assert(FilePtrRes != INVALID_SET_FILE_POINTER && FilePtrRes != ERROR_NEGATIVE_SEEK);
-
-			DWORD BytesRead;
-			char *FileBuf = VirtualAlloc(0, ToRead, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-			assert(ReadFile(LogFile, FileBuf, ToRead, &BytesRead, 0) && (i32)BytesRead == ToRead);
-
-			// Both files must have the same EOL encoding.
-			assert(GetStrEOLType(FileBuf) == EOLType);
-			// File should always end with a new line.
-			if(!IsEOLChar(FileBuf[ToRead - 1]))
-			{
-				DWORD BytesWritten;
-				assert(WriteFile(LogFile, EOLStr, EOLLen, &BytesWritten, 0) && BytesWritten == EOLLen);
-			}
-
-			VirtualFree(FileBuf, ToRead, MEM_RELEASE);
 		}
 	}
 
@@ -533,6 +413,15 @@ int __stdcall WinMain(HINSTANCE hInstance,
 	}
 
 	assert(CloseHandle(LogFile));
+	assert(CloseHandle(Symbols.SymFile));
+
+	assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_READONLY));
+	assert(SetFileAttributes(SymFilename, FILE_ATTRIBUTE_READONLY));
 
 	return 0;
 }
+
+//bool ExitRoutine(DWORD CtrlType)
+//{
+//
+//}
