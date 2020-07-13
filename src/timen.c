@@ -2,7 +2,6 @@
 #include <Windows.h>
 #include <Psapi.h>
 
-#include <atomic>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -267,16 +266,12 @@ ui32 ProcessProcSym(proc_sym_table *Syms, const char *Str)
 	}
 }
 
-bool ExitRoutine(DWORD CtrlType);
-
 int __stdcall WinMain(HINSTANCE hInstance,
 											HINSTANCE hPrevInstance,
 											LPSTR lpCmdLine,
 											int nShowCmd)
 {
-	//SetConsoleCtrlHandler(&ExitRoutine, true);
-
-			const char *DataDir = "..\\data";
+	const char *DataDir = "..\\data";
 	CreateDirectory(DataDir, 0);
 	assert(SetCurrentDirectory(DataDir));
 
@@ -314,11 +309,9 @@ int __stdcall WinMain(HINSTANCE hInstance,
 	DWORD PrevLastInput = 0;
 	ui64 LastInputTime = 0;
 
-	i32 Iterations = 100;
+	int Iterations = 100;
 	while(Iterations--)
 	{
-		Sleep(SleepS * 1000);
-
 		char ProgInfo[MAX_PATH * 2] = "\0";
 		ui32 ProgInfoLen = 0;
 		bool Failed = false;
@@ -421,8 +414,3 @@ int __stdcall WinMain(HINSTANCE hInstance,
 
 	return 0;
 }
-
-//bool ExitRoutine(DWORD CtrlType)
-//{
-//
-//}
