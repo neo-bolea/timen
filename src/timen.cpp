@@ -1,7 +1,12 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <Psapi.h>
+#include <rpc.h>
+#include <shellapi.h>
+#include <Shlwapi.h>
 
+#include <atomic>
+#include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -15,6 +20,9 @@ typedef uint8_t ui8;
 typedef uint16_t ui16;
 typedef uint32_t ui32;
 typedef uint64_t ui64;
+
+typedef float f32;
+typedef double f64;
 
 #define internal static;
 #define global static;
@@ -257,7 +265,7 @@ ui32 ProcessProcSym(proc_sym_table *Syms, const char *Str)
 		char *SymBufEnd = StrEnd(NewSym.Str);
 		SymBufEnd = InsertEOL(SymBufEnd);
 		*SymBufEnd = '\0';
-		ui32 NewSymBufLen = SymBufEnd - NewSym.Str;
+		ui32 NewSymBufLen = (ui32)(SymBufEnd - NewSym.Str);
 		assert(SetFilePointer(Syms->SymFile, 0, 0, FILE_END) != INVALID_SET_FILE_POINTER);
 		assert(WriteFile(Syms->SymFile, NewSym.Str, NewSymBufLen, &BytesWritten, 0));
 		assert((i32)BytesWritten == NewSymBufLen);
@@ -266,28 +274,43 @@ ui32 ProcessProcSym(proc_sym_table *Syms, const char *Str)
 	}
 }
 
+std::atomic_bool Running = true;
+DWORD WINAPI NotifIconThread(void *Args);
+
+// TODO: Unicode (UTF-8) support
 int __stdcall WinMain(HINSTANCE hInstance,
 											HINSTANCE hPrevInstance,
 											LPSTR lpCmdLine,
 											int nShowCmd)
 {
+	DWORD ThreadID;
+	HANDLE ThreadHnd = CreateThread(0, 0, NotifIconThread, hInstance, 0, &ThreadID);
+	assert(ThreadHnd != INVALID_HANDLE_VALUE);
+
 	const char *DataDir = "..\\data";
 	CreateDirectory(DataDir, 0);
 	assert(SetCurrentDirectory(DataDir));
+
+	char *LogFilename = "Log.txt";
+	char *SymFilename = "Log.sym";
 
 	proc_sym_table Symbols;
 	// By filling with zero we assure that unused symbol slots will be overwritten (since they will have a timestamp of 0, the oldest number)
 	memset(&Symbols, 0, sizeof(proc_sym_table));
 
-	const i32 SleepS = 1;
+	const ui32 SleepS = 1;
 	const i32 InactivityThreshS = 2;
-	char *LogFilename = "Log.txt";
-	char *SymFilename = "Log.sym";
-	assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_NORMAL));
+	if(PathFileExists(LogFilename))
+	{
+		assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_NORMAL));
+	}
 	HANDLE LogFile = CreateFile(LogFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	assert(LogFile != INVALID_HANDLE_VALUE);
 
-	assert(SetFileAttributes(SymFilename, FILE_ATTRIBUTE_NORMAL));
+	if(PathFileExists(SymFilename))
+	{
+		assert(SetFileAttributes(SymFilename, FILE_ATTRIBUTE_NORMAL));
+	}
 	Symbols.SymFile = CreateFile(SymFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	assert(Symbols.SymFile != INVALID_HANDLE_VALUE);
 
@@ -309,14 +332,16 @@ int __stdcall WinMain(HINSTANCE hInstance,
 	DWORD PrevLastInput = 0;
 	ui64 LastInputTime = 0;
 
-	int Iterations = 100;
-	while(Iterations--)
+	while(Running)
 	{
+		printf("Next...\n");
+		Sleep(1000 * SleepS);
+
 		char ProgInfo[MAX_PATH * 2] = "\0";
 		ui32 ProgInfoLen = 0;
 		bool Failed = false;
 
-		// By not directly using LastInputInfo's time, only comparing to it, we prevent overflow problems for i32.
+		// By not directly using LastInputInfo's time, only comparing to it, we prevent overflow problems for integers.
 		LASTINPUTINFO LastInputInfo = {sizeof(LASTINPUTINFO), 0};
 		assert(GetLastInputInfo(&LastInputInfo));
 		if(PrevLastInput != LastInputInfo.dwTime)
@@ -332,7 +357,7 @@ int __stdcall WinMain(HINSTANCE hInstance,
 		if(LastInputTime >= InactivityThreshS)
 		{
 			strcpy_s(ProgInfo, ArrayLength(ProgInfo), "Idle\n");
-			ProgInfoLen = strlen(ProgInfo);
+			ProgInfoLen = (ui32)strlen(ProgInfo);
 		}
 		else
 		{
@@ -372,7 +397,7 @@ int __stdcall WinMain(HINSTANCE hInstance,
 					{
 						ui32 SymValue = ProcessProcSym(&Symbols, ProcName);
 						//wsprintf(ProgInfo, "%s%s%i for %is (%s)%s", Title, EOLStr, SymValue, ProcDuration, ProcName, EOLStr);
-						ProgInfoLen = strlen(ProgInfo);
+						ProgInfoLen = (ui32)strlen(ProgInfo);
 
 						ui32 FileValue = FindSymbolInFile(&Symbols, ProcName);
 						assert(FileValue == SymValue);
@@ -396,7 +421,7 @@ int __stdcall WinMain(HINSTANCE hInstance,
 			char *ProgInfoEnd = ProgInfo + ProgInfoLen;
 			ProgInfoEnd = InsertEOL(ProgInfoEnd);
 			*ProgInfoEnd = '\0';
-			ProgInfoLen = ProgInfoEnd - ProgInfo;
+			ProgInfoLen = (ui32)(ProgInfoEnd - ProgInfo);
 
 			DWORD BytesWritten;
 			assert(SetFilePointer(LogFile, 0, 0, FILE_END) != INVALID_SET_FILE_POINTER);
@@ -406,11 +431,138 @@ int __stdcall WinMain(HINSTANCE hInstance,
 		}
 	}
 
-	assert(CloseHandle(LogFile));
-	assert(CloseHandle(Symbols.SymFile));
+	assert(WaitForSingleObject(ThreadHnd, 1000) != WAIT_TIMEOUT);
 
+	CloseHandle(LogFile);
+	CloseHandle(Symbols.SymFile);
+
+#ifndef DEBUG
 	assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_READONLY));
 	assert(SetFileAttributes(SymFilename, FILE_ATTRIBUTE_READONLY));
+#endif
 
+	// TODO: Save text files.
+
+	return 0;
+}
+
+typedef struct win_data
+{
+	NOTIFYICONDATA *NotifIcon;
+} win_data;
+
+#define WM_USER_SHELLICON WM_USER + 1
+#define IDM_EXIT WM_USER + 2
+LRESULT CALLBACK WndProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
+{
+	LRESULT Result = 0;
+	win_data *WD = (win_data *)GetWindowLongPtr(Wnd, GWLP_USERDATA);
+	switch(Msg)
+	{
+		case WM_USER_SHELLICON:
+		{
+			switch(LOWORD(L))
+			{
+				case WM_RBUTTONDOWN:
+				{
+					POINT CursorPos;
+					GetCursorPos(&CursorPos);
+					HMENU hPopMenu = CreatePopupMenu();
+					InsertMenu(hPopMenu, (ui32)-1, MF_BYPOSITION | MF_STRING, IDM_EXIT, "Exit");
+					SetForegroundWindow(Wnd);
+					TrackPopupMenu(hPopMenu, TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_LEFTBUTTON, CursorPos.x, CursorPos.y, 0, Wnd, NULL);
+					return true;
+				}
+			}
+		}
+		break;
+
+		case WM_MENUCOMMAND:
+		case WM_COMMAND:
+		{
+			switch(LOWORD(W))
+			{
+				case IDM_EXIT:
+					PostQuitMessage(0);
+					break;
+				default:
+					return DefWindowProc(Wnd, Msg, W, L);
+			}
+			break;
+		}
+
+		case WM_QUERYENDSESSION:
+		{
+			// TODO: Implement saving
+		}
+		break;
+		case WM_ENDSESSION:
+		{
+			// TODO: Implement
+		}
+		break;
+
+		case WM_QUIT:
+		case WM_CLOSE:
+			assert(false);
+			break;
+
+		default:
+			Result = DefWindowProc(Wnd, Msg, W, L);
+	}
+
+	return Result;
+}
+
+DWORD WINAPI NotifIconThread(void *Args)
+{
+	HINSTANCE hInstance = (HINSTANCE)Args;
+
+	win_data WD;
+	HWND Window;
+	NOTIFYICONDATA NotifIcon;
+	{
+		WNDCLASSEX WndClass;
+		memset(&WndClass, 0, sizeof(WNDCLASSEX));
+		WndClass.cbSize = sizeof(WNDCLASSEX);
+		WndClass.lpfnWndProc = &WndProc;
+		WndClass.hInstance = hInstance;
+		WndClass.lpszClassName = "timen";
+		WndClass.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+		WndClass.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
+		assert(RegisterClassEx(&WndClass));
+		Window = CreateWindow(WndClass.lpszClassName, "timen", WS_MINIMIZE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, hInstance, 0);
+		assert(Window != INVALID_HANDLE_VALUE);
+		SetWindowLongPtr(Window, GWLP_USERDATA, (LONG_PTR)&WD);
+
+		WD.NotifIcon = &NotifIcon;
+
+		UUID IconUuid;
+		assert(UuidCreateSequential(&IconUuid) == RPC_S_OK);
+
+		memset(&NotifIcon, 0, sizeof(NOTIFYICONDATA));
+		NotifIcon.cbSize = sizeof(NOTIFYICONDATA);
+		NotifIcon.hWnd = Window;
+		NotifIcon.uID = IconUuid.Data1;
+		NotifIcon.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+		NotifIcon.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+		NotifIcon.uCallbackMessage = WM_USER_SHELLICON;
+		strcpy_s(NotifIcon.szTip, ArrayLength(NotifIcon.szTip), "timen");
+		assert(Shell_NotifyIcon(NIM_ADD, &NotifIcon));
+	}
+
+	MSG Msg;
+	while(GetMessage(&Msg, Window, 0, 0))
+	{
+		TranslateMessage(&Msg);
+		DispatchMessage(&Msg);
+	}
+
+	Shell_NotifyIcon(NIM_DELETE, &NotifIcon);
+	DestroyWindow(Window);
+
+	printf("Exiting...\n");
+
+	Running = false;
 	return 0;
 }
