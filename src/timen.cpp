@@ -24,9 +24,9 @@ typedef uint64_t ui64;
 typedef float f32;
 typedef double f64;
 
-#define internal static;
-#define global static;
-#define persist static;
+#define internal static
+#define global static
+#define persist static
 
 #ifdef DEBUG
 #define assert(Expr) \
@@ -274,6 +274,39 @@ ui32 ProcessProcSym(proc_sym_table *Syms, const char *Str)
 	}
 }
 
+void LogProgram(HANDLE File, const char *Title, i32 Symbol, LARGE_INTEGER ProcBegin, LARGE_INTEGER ProcEnd, LARGE_INTEGER QueryFreq)
+{
+	f32 fProcTime = ((f32)(ProcEnd.QuadPart - ProcBegin.QuadPart) / (f32)QueryFreq.QuadPart);
+	assert(fProcTime > 0.001f);
+	i32 ProcTime = (i32)fProcTime;
+
+	char LogBuffer[256];
+	wsprintf(LogBuffer, "%s%s%i%s%i%s%s", Title, EOLStr, Symbol, EOLStr, ProcTime, EOLStr, EOLStr); // TODO: Log at sub-second precision?
+	i32 LogLen = (i32)strlen(LogBuffer);
+
+	DWORD BytesWritten;
+	assert(SetFilePointer(File, 0, 0, FILE_END) != INVALID_SET_FILE_POINTER);
+	assert(WriteFile(File, LogBuffer, LogLen, &BytesWritten, 0) && (i32)BytesWritten == LogLen);
+}
+
+bool GetActiveProgramInfo(HWND ActiveWin, char *ProcBuf, ui32 ProcBufLen)
+{
+	DWORD ProcID;
+	if(GetWindowThreadProcessId(ActiveWin, &ProcID))
+	{
+		assert(ProcID);
+		HANDLE FGProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, ProcID);
+		if(FGProc != INVALID_HANDLE_VALUE)
+		{
+			if(GetProcessImageFileName(FGProc, ProcBuf, ProcBufLen))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 std::atomic_bool Running = true;
 DWORD WINAPI NotifIconThread(void *Args);
 
@@ -329,6 +362,13 @@ int __stdcall WinMain(HINSTANCE hInstance,
 		}
 	}
 
+	LARGE_INTEGER QueryFreq;
+	QueryPerformanceFrequency(&QueryFreq);
+	LARGE_INTEGER ProcBegin = {}, ProcEnd = {};
+	bool WasIdle = false;
+	char CurTitle[MAX_PATH] = "\0", CurProcBuf[MAX_PATH] = "\0";
+	bool ProgramValid = false;
+
 	DWORD PrevLastInput = 0;
 	ui64 LastInputTime = 0;
 	i32 ProcSymValue;
@@ -348,65 +388,69 @@ int __stdcall WinMain(HINSTANCE hInstance,
 		}
 
 
-		printf("Next...\n");
-		Sleep(1000 * SleepS);
+		bool IsIdle = (LastInputTime >= InactivityThreshS);
 
-		bool WriteProc = false;
-
-		if(LastInputTime >= InactivityThreshS)
+		if(WasIdle && !IsIdle)
 		{
-			ProcSymValue = -1;
-			WriteProc = true;
+			QueryPerformanceCounter(&ProcEnd);
+
+			// Log the idling time
+			LogProgram(LogFile, "Idle", -1, ProcBegin, ProcEnd, QueryFreq);
 		}
-		else
+
+		// If the user isn't idle, check if the program changed
+		bool ProgramChanged = false;
+		char NewTitle[MAX_PATH] = "\0";
+		HWND ActiveWin = {};
+		if(!IsIdle)
 		{
-			HWND ActiveWin = GetForegroundWindow();
-			char Title[MAX_PATH] = "\0";
-			if(ActiveWin && GetWindowText(ActiveWin, Title, ArrayLength(Title)))
+			if(ActiveWin = GetForegroundWindow())
 			{
-				DWORD ProcID;
-				if(GetWindowThreadProcessId(ActiveWin, &ProcID))
+				GetWindowText(ActiveWin, NewTitle, ArrayLength(NewTitle));
+				if(strcmp(CurTitle, NewTitle) != 0)
 				{
-					assert(ProcID);
-					HANDLE FGProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, ProcID);
-					if(FGProc)
-					{
-						char ProcNameBuf[MAX_PATH] = "\0";
-						if(GetProcessImageFileName(FGProc, ProcNameBuf, ArrayLength(ProcNameBuf)))
-						{
-							char *ProcName = strrchr(ProcNameBuf, '\\') + 1;
-							ProcSymValue = ProcessProcSym(&Symbols, ProcName);
-							//wsprintf(ProgInfo, "%s%s%i for %is (%s)%s", Title, EOLStr, SymValue, ProcDuration, ProcName, EOLStr);
-
-							ui32 FileValue = FindSymbolInFile(&Symbols, ProcName);
-							assert(FileValue == ProcSymValue);
-
-							WriteProc = true;
-						}
-					}
+					ProgramChanged = true;
 				}
 			}
 		}
 
-		// TODO: Only write to file if process name or title changed, otherwise increase a counter.
-		if(WriteProc)
+		// If the active process is changing or the user is becoming idle, log the last active process
+		if(ProgramChanged || (!WasIdle && IsIdle))
 		{
-			assert(ProgInfoLen < ArrayLength(ProgInfo) + 1);
-			char *ProgInfoEnd = ProgInfo + ProgInfoLen;
-			ProgInfoEnd = InsertEOL(ProgInfoEnd);
-			*ProgInfoEnd = '\0';
-			ProgInfoLen = (ui32)(ProgInfoEnd - ProgInfo);
+			QueryPerformanceCounter(&ProcEnd);
 
-			DWORD BytesWritten;
-			assert(SetFilePointer(LogFile, 0, 0, FILE_END) != INVALID_SET_FILE_POINTER);
-			assert(WriteFile(LogFile, ProgInfo, ProgInfoLen, &BytesWritten, 0));
-			assert(BytesWritten == ProgInfoLen);
-			OutputDebugString(ProgInfo);
+			if(ProgramValid)
+			{
+				// Convert process name to a symbol
+				char *ProcName = strrchr(CurProcBuf, '\\') + 1;
+				ProcSymValue = ProcessProcSym(&Symbols, ProcName);
+				i32 FileValue = FindSymbolInFile(&Symbols, ProcName);
+				assert(FileValue == ProcSymValue);
+
+				// Log the result
+				LogProgram(LogFile, CurTitle, ProcSymValue, ProcBegin, ProcEnd, QueryFreq);
+			}
+
+			QueryPerformanceCounter(&ProcBegin);
+			strcpy_s(CurTitle, NewTitle);
+
+			if(ProgramChanged)
+			{
+				// A program whose title or process name we can't decipher is not valid
+				ProgramValid = GetActiveProgramInfo(ActiveWin, CurProcBuf, ArrayLength(CurProcBuf));
+			}
+			else
+			{
+				// Idle is not a valid program
+				ProgramValid = false;
+			}
 		}
-		else
-		{
-			int x;
-		}
+
+		WasIdle = IsIdle;
+
+		printf("Next...\n");
+		// TODO: Sleep so that each second (or whatever interval) is perfectly matched, especially in the long run (e.g. 1:15.501 to 4:40.501 at 1s intervals)
+		Sleep(1000 * SleepS);
 	}
 
 	assert(WaitForSingleObject(ThreadHnd, 1000) != WAIT_TIMEOUT);

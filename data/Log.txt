@@ -1,0 +1,32 @@
+timen (Debugging) - Microsoft Visual Studio
+0
+1
+
+timen (Running) - Microsoft Visual Studio
+0
+1
+
+Idle
+-1
+1
+
+timen (Running) - Microsoft Visual Studio
+0
+6
+
+Reload
+2
+2
+
+*P:\C++\timen\data\Log.txt - Notepad++
+2
+7
+
+Idle
+-1
+4
+
+timen (Running) - Microsoft Visual Studio
+0
+5
+
