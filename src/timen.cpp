@@ -331,16 +331,9 @@ int __stdcall WinMain(HINSTANCE hInstance,
 
 	DWORD PrevLastInput = 0;
 	ui64 LastInputTime = 0;
-
+	i32 ProcSymValue;
 	while(Running)
 	{
-		printf("Next...\n");
-		Sleep(1000 * SleepS);
-
-		char ProgInfo[MAX_PATH * 2] = "\0";
-		ui32 ProgInfoLen = 0;
-		bool Failed = false;
-
 		// By not directly using LastInputInfo's time, only comparing to it, we prevent overflow problems for integers.
 		LASTINPUTINFO LastInputInfo = {sizeof(LASTINPUTINFO), 0};
 		assert(GetLastInputInfo(&LastInputInfo));
@@ -354,68 +347,49 @@ int __stdcall WinMain(HINSTANCE hInstance,
 			LastInputTime += SleepS;
 		}
 
+
+		printf("Next...\n");
+		Sleep(1000 * SleepS);
+
+		bool WriteProc = false;
+
 		if(LastInputTime >= InactivityThreshS)
 		{
-			strcpy_s(ProgInfo, ArrayLength(ProgInfo), "Idle\n");
-			ProgInfoLen = (ui32)strlen(ProgInfo);
+			ProcSymValue = -1;
+			WriteProc = true;
 		}
 		else
 		{
 			HWND ActiveWin = GetForegroundWindow();
-			if(ActiveWin)
+			char Title[MAX_PATH] = "\0";
+			if(ActiveWin && GetWindowText(ActiveWin, Title, ArrayLength(Title)))
 			{
-				char ProcNameBuf[MAX_PATH] = "\0";
-				char *ProcName = 0;
-				char Title[MAX_PATH] = "\0";
-				ui32 TitleLen = 0, ProcNameLen = 0;
 				DWORD ProcID;
-
-				GetWindowThreadProcessId(ActiveWin, &ProcID);
-				if(ProcID)
+				if(GetWindowThreadProcessId(ActiveWin, &ProcID))
 				{
+					assert(ProcID);
 					HANDLE FGProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, ProcID);
 					if(FGProc)
 					{
-						ProcNameLen = GetProcessImageFileName(FGProc, ProcNameBuf, ArrayLength(ProcNameBuf));
-						if(!ProcNameLen)
+						char ProcNameBuf[MAX_PATH] = "\0";
+						if(GetProcessImageFileName(FGProc, ProcNameBuf, ArrayLength(ProcNameBuf)))
 						{
-							*ProcNameBuf = 0;
+							char *ProcName = strrchr(ProcNameBuf, '\\') + 1;
+							ProcSymValue = ProcessProcSym(&Symbols, ProcName);
+							//wsprintf(ProgInfo, "%s%s%i for %is (%s)%s", Title, EOLStr, SymValue, ProcDuration, ProcName, EOLStr);
+
+							ui32 FileValue = FindSymbolInFile(&Symbols, ProcName);
+							assert(FileValue == ProcSymValue);
+
+							WriteProc = true;
 						}
-						else
-						{
-							ProcName = strrchr(ProcNameBuf, '\\') + 1;
-						}
 					}
-				}
-
-
-				if(*ProcNameBuf)
-				{
-					TitleLen = GetWindowText(ActiveWin, Title, ArrayLength(Title));
-
-					if(*Title)
-					{
-						ui32 SymValue = ProcessProcSym(&Symbols, ProcName);
-						//wsprintf(ProgInfo, "%s%s%i for %is (%s)%s", Title, EOLStr, SymValue, ProcDuration, ProcName, EOLStr);
-						ProgInfoLen = (ui32)strlen(ProgInfo);
-
-						ui32 FileValue = FindSymbolInFile(&Symbols, ProcName);
-						assert(FileValue == SymValue);
-					}
-					else
-					{
-						Failed = true;
-					}
-				}
-				else
-				{
-					Failed = true;
 				}
 			}
 		}
 
 		// TODO: Only write to file if process name or title changed, otherwise increase a counter.
-		if(!Failed)
+		if(WriteProc)
 		{
 			assert(ProgInfoLen < ArrayLength(ProgInfo) + 1);
 			char *ProgInfoEnd = ProgInfo + ProgInfoLen;
@@ -428,6 +402,10 @@ int __stdcall WinMain(HINSTANCE hInstance,
 			assert(WriteFile(LogFile, ProgInfo, ProgInfoLen, &BytesWritten, 0));
 			assert(BytesWritten == ProgInfoLen);
 			OutputDebugString(ProgInfo);
+		}
+		else
+		{
+			int x;
 		}
 	}
 
