@@ -4,6 +4,9 @@
 #include <rpc.h>
 #include <shellapi.h>
 #include <Shlwapi.h>
+#include <UIAutomation.h>
+#include <AtlBase.h>
+#include <AtlCom.h>
 
 #include <atomic>
 #include <stdio.h>
@@ -37,7 +40,7 @@ typedef double f64;
 	0
 #else
 #define assert(Expr) \
-	(Expr);              \
+	(Expr);            \
 	0
 #endif
 #define ArrayLength(Array) (sizeof(Array) / sizeof(Array[0]))
@@ -82,6 +85,51 @@ char *StrEnd(char *Str)
 	}
 	return Str;
 }
+
+void WidenUTF(wchar_t *Dst, i32 DstLen, char *Src, i32 SrcLen = -1)
+{
+	if(SrcLen == -1)
+	{
+		SrcLen = (i32)strlen(Src) + 1;
+	}
+	assert(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, Src, SrcLen, Dst, DstLen));
+}
+
+wchar_t *WidenUTFAlloc(char *Str, i32 StrLen = -1)
+{
+	if(StrLen == -1)
+	{
+		StrLen = (i32)strlen(Str) + 1;
+	}
+	i32 ReqSize = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, Str, StrLen, 0, 0);
+	wchar_t *Res = (wchar_t *)malloc(ReqSize);
+	WidenUTF(Res, ReqSize, Str, StrLen);
+	return Res;
+}
+
+void NarrowUTF(char *Dst, i32 DstLen, wchar_t *Src, i32 SrcLen = -1)
+{
+	if(SrcLen == -1)
+	{
+		SrcLen = (i32)wcslen(Src) + 1;
+	}
+	assert(WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Src, SrcLen, Dst, DstLen, 0, 0));
+
+}
+
+char *NarrowUTFAlloc(wchar_t *Str, i32 StrLen = -1)
+{
+	if(StrLen == -1)
+	{
+		StrLen = (i32)wcslen(Str) + 1;
+	}
+	i32 ReqSize = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Str, StrLen, 0, 0, 0, 0);
+	char *Res = (char *)malloc(ReqSize);
+	NarrowUTF(Res, ReqSize, Str, StrLen);
+	return Res;
+}
+
+#define FreeUTF(Ptr) free((Ptr));
 #pragma endregion
 
 #pragma region EOL
@@ -274,11 +322,11 @@ ui32 ProcessProcSym(proc_sym_table *Syms, const char *Str)
 	}
 }
 
-void LogProgram(HANDLE File, const char *Title, i32 Symbol, f32 fProcTime)
+void LogProgram(HANDLE File, const char *Title, i32 ProcSymbol, f32 fProcTime)
 {
 	assert(strlen(Title));
 	char LogBuffer[256];
-	sprintf_s(LogBuffer, "%s%s%i%s%f%s%s", Title, EOLStr, Symbol, EOLStr, fProcTime, EOLStr, EOLStr); // TODO: Log at sub-second precision?
+	sprintf_s(LogBuffer, "%s%s%i%s%f%s%s", Title, EOLStr, ProcSymbol, EOLStr, fProcTime, EOLStr, EOLStr); // TODO: Log at sub-second precision?
 	i32 LogLen = (i32)strlen(LogBuffer);
 
 	DWORD BytesWritten;
@@ -313,6 +361,45 @@ bool GetActiveProgramInfo(HWND ActiveWin, char *ProcBuf, ui32 ProcBufLen)
 
 std::atomic_bool Running = true;
 DWORD WINAPI NotifIconThread(void *Args);
+
+void GetActiveTab(HWND Wnd)
+{
+	CoInitialize(NULL);
+	while(true)
+	{
+		if(!IsWindowVisible(Wnd))
+			return;
+
+		CComQIPtr<IUIAutomation> uia;
+		if(FAILED(uia.CoCreateInstance(CLSID_CUIAutomation)) || !uia)
+			return;
+
+		CComPtr<IUIAutomationElement> root;
+		if(FAILED(uia->ElementFromHandle(Wnd, &root)) || !root)
+			return;
+
+		CComPtr<IUIAutomationCondition> condition;
+
+		//URL's id is 0xC354, or use UIA_EditControlTypeId for 1st edit box
+		uia->CreatePropertyCondition(UIA_ControlTypePropertyId,
+																 CComVariant(0xC354), &condition);
+
+		//or use edit control's name instead
+		//uia->CreatePropertyCondition(UIA_NamePropertyId,
+		//      CComVariant(L"Address and search bar"), &condition);
+
+		CComPtr<IUIAutomationElement> edit;
+		if(FAILED(root->FindFirst(TreeScope_Descendants, condition, &edit)) || !edit)
+			return; //maybe we don't have the right tab, continue...
+
+		CComVariant url;
+		edit->GetCurrentPropertyValue(UIA_ValueValuePropertyId, &url);
+		char *Val = NarrowUTFAlloc(url.bstrVal);
+		MessageBox(0, Val, 0, 0);
+		FreeUTF(Val);
+	}
+	CoUninitialize();
+}
 
 // TODO: Unicode (UTF-8) support
 int __stdcall WinMain(HINSTANCE hInstance,
@@ -428,6 +515,7 @@ int __stdcall WinMain(HINSTANCE hInstance,
 			if(ActiveWin = GetForegroundWindow())
 			{
 				GetWindowText(ActiveWin, NewTitle, ArrayLength(NewTitle));
+
 				if(!*NewTitle)
 				{
 					strcpy_s(NewTitle, "Unknown");
