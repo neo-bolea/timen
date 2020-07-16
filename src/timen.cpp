@@ -1,3 +1,9 @@
+// Visual Studio doesn't know what macros are defined in the build file, so dummy macros are defined here (that aren't actually defined).
+#ifndef VS_DUMMY
+#define DEBUG
+#define UNICODE
+#endif
+
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <Psapi.h>
@@ -90,8 +96,9 @@ void WidenUTF(wchar_t *Dst, i32 DstLen, char *Src, i32 SrcLen = -1)
 {
 	if(SrcLen == -1)
 	{
-		SrcLen = (i32)strlen(Src) + 1;
+		SrcLen = (i32)strlen(Src);
 	}
+	SrcLen++;
 	assert(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, Src, SrcLen, Dst, DstLen));
 }
 
@@ -99,8 +106,9 @@ wchar_t *WidenUTFAlloc(char *Str, i32 StrLen = -1)
 {
 	if(StrLen == -1)
 	{
-		StrLen = (i32)strlen(Str) + 1;
+		StrLen = (i32)strlen(Str);
 	}
+	StrLen++;
 	i32 ReqSize = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, Str, StrLen, 0, 0);
 	wchar_t *Res = (wchar_t *)malloc(ReqSize);
 	WidenUTF(Res, ReqSize, Str, StrLen);
@@ -111,18 +119,19 @@ void NarrowUTF(char *Dst, i32 DstLen, wchar_t *Src, i32 SrcLen = -1)
 {
 	if(SrcLen == -1)
 	{
-		SrcLen = (i32)wcslen(Src) + 1;
+		SrcLen = (i32)wcslen(Src);
 	}
+	SrcLen++;
 	assert(WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Src, SrcLen, Dst, DstLen, 0, 0));
-
 }
 
 char *NarrowUTFAlloc(wchar_t *Str, i32 StrLen = -1)
 {
 	if(StrLen == -1)
 	{
-		StrLen = (i32)wcslen(Str) + 1;
+		StrLen = (i32)wcslen(Str);
 	}
+	StrLen++;
 	i32 ReqSize = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Str, StrLen, 0, 0, 0, 0);
 	char *Res = (char *)malloc(ReqSize);
 	NarrowUTF(Res, ReqSize, Str, StrLen);
@@ -322,11 +331,11 @@ ui32 ProcessProcSym(proc_sym_table *Syms, const char *Str)
 	}
 }
 
-void LogProgram(HANDLE File, const char *Title, i32 ProcSymbol, f32 fProcTime)
+void LogProgram(HANDLE File, const char *Title, i32 ProcSymbol, const char *Info, f32 fProcTime)
 {
 	assert(strlen(Title));
 	char LogBuffer[256];
-	sprintf_s(LogBuffer, "%s%s%i%s%f%s%s", Title, EOLStr, ProcSymbol, EOLStr, fProcTime, EOLStr, EOLStr); // TODO: Log at sub-second precision?
+	sprintf_s(LogBuffer, "%s%s%i%s%s%s%f%s%s", Title, EOLStr, ProcSymbol, EOLStr, Info, EOLStr, fProcTime, EOLStr, EOLStr); // TODO: Log at sub-second precision?
 	i32 LogLen = (i32)strlen(LogBuffer);
 
 	DWORD BytesWritten;
@@ -336,6 +345,7 @@ void LogProgram(HANDLE File, const char *Title, i32 ProcSymbol, f32 fProcTime)
 
 bool GetActiveProgramInfo(HWND ActiveWin, char *ProcBuf, ui32 ProcBufLen)
 {
+	wchar_t ProcBufW[255];
 	DWORD ProcID;
 	if(GetWindowThreadProcessId(ActiveWin, &ProcID))
 	{
@@ -343,8 +353,9 @@ bool GetActiveProgramInfo(HWND ActiveWin, char *ProcBuf, ui32 ProcBufLen)
 		HANDLE FGProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, ProcID);
 		if(FGProc != INVALID_HANDLE_VALUE)
 		{
-			if(GetProcessImageFileName(FGProc, ProcBuf, ProcBufLen))
+			if(GetProcessImageFileName(FGProc, ProcBufW, ArrayLength(ProcBufW)))
 			{
+				NarrowUTF(ProcBuf, ProcBufLen, ProcBufW);
 				return true;
 			}
 		}
@@ -367,9 +378,6 @@ void GetActiveTab(HWND Wnd)
 	CoInitialize(NULL);
 	while(true)
 	{
-		if(!IsWindowVisible(Wnd))
-			return;
-
 		CComQIPtr<IUIAutomation> uia;
 		if(FAILED(uia.CoCreateInstance(CLSID_CUIAutomation)) || !uia)
 			return;
@@ -394,14 +402,11 @@ void GetActiveTab(HWND Wnd)
 
 		CComVariant url;
 		edit->GetCurrentPropertyValue(UIA_ValueValuePropertyId, &url);
-		char *Val = NarrowUTFAlloc(url.bstrVal);
-		MessageBox(0, Val, 0, 0);
-		FreeUTF(Val);
+		MessageBox(0, url.bstrVal, 0, 0);
 	}
 	CoUninitialize();
 }
 
-// TODO: Unicode (UTF-8) support
 int __stdcall WinMain(HINSTANCE hInstance,
 											HINSTANCE hPrevInstance,
 											LPSTR lpCmdLine,
@@ -411,17 +416,18 @@ int __stdcall WinMain(HINSTANCE hInstance,
 	HANDLE ThreadHnd = CreateThread(0, 0, NotifIconThread, hInstance, 0, &ThreadID);
 	assert(ThreadHnd != INVALID_HANDLE_VALUE);
 
-	const char *DataDir = "..\\data";
+	const wchar_t *DataDir = L"..\\data";
 	CreateDirectory(DataDir, 0);
 	assert(SetCurrentDirectory(DataDir));
 
-	char *LogFilename = "Log.txt";
-	char *SymFilename = "Log.sym";
+	wchar_t *LogFilename = L"Log.txt";
+	wchar_t *SymFilename = L"Log.sym";
 
 	proc_sym_table Symbols;
 	// By filling with zero we assure that unused symbol slots will be overwritten (since they will have a timestamp of 0, the oldest number)
 	memset(&Symbols, 0, sizeof(proc_sym_table));
 
+	// TODO: Switch to second granularity once finished debugging. Also log seconds, not milliseconds.
 	const ui32 SleepMS = 100;
 	const i32 InactivityThreshMS = 2000;
 	if(PathFileExists(LogFilename))
@@ -503,18 +509,20 @@ int __stdcall WinMain(HINSTANCE hInstance,
 #endif
 
 			// Log the idling time
-			LogProgram(LogFile, "Idle", -1, fProcTime);
+			LogProgram(LogFile, "Idle", -1, "-", fProcTime);
 		}
 
 		// If the user isn't idle, check if the program changed
 		bool ProgramChanged = false;
 		char NewTitle[MAX_PATH] = "\0";
+		wchar_t NewTitleW[MAX_PATH] = L"\0";
 		HWND ActiveWin = {};
 		if(!IsIdle)
 		{
 			if(ActiveWin = GetForegroundWindow())
 			{
-				GetWindowText(ActiveWin, NewTitle, ArrayLength(NewTitle));
+				GetWindowText(ActiveWin, NewTitleW, ArrayLength(NewTitleW));
+				NarrowUTF(NewTitle, ArrayLength(NewTitle), NewTitleW);
 
 				if(!*NewTitle)
 				{
@@ -555,8 +563,9 @@ int __stdcall WinMain(HINSTANCE hInstance,
 				f32 fProcTime = ((f32)(ProcEnd.QuadPart - ProcBegin.QuadPart) / (f32)QueryFreq.QuadPart);
 				assert(fProcTime > 0.001f);
 
+				// TODO: Add extra info to certain windows (e.g. tab/site info for browsers).
 				// Log the result
-				LogProgram(LogFile, CurTitle, ProcSymValue, fProcTime);
+				LogProgram(LogFile, CurTitle, ProcSymValue, "-", fProcTime);
 			}
 
 			QueryPerformanceCounter(&ProcBegin);
@@ -625,7 +634,7 @@ LRESULT CALLBACK WndProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 					POINT CursorPos;
 					GetCursorPos(&CursorPos);
 					HMENU hPopMenu = CreatePopupMenu();
-					InsertMenu(hPopMenu, (ui32)-1, MF_BYPOSITION | MF_STRING, IDM_EXIT, "Exit");
+					InsertMenu(hPopMenu, (ui32)-1, MF_BYPOSITION | MF_STRING, IDM_EXIT, L"Exit");
 					SetForegroundWindow(Wnd);
 					TrackPopupMenu(hPopMenu, TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_LEFTBUTTON, CursorPos.x, CursorPos.y, 0, Wnd, NULL);
 					return true;
@@ -684,11 +693,11 @@ DWORD WINAPI NotifIconThread(void *Args)
 		WndClass.cbSize = sizeof(WNDCLASSEX);
 		WndClass.lpfnWndProc = &WndProc;
 		WndClass.hInstance = hInstance;
-		WndClass.lpszClassName = "timen";
+		WndClass.lpszClassName = L"timen";
 		WndClass.hIcon = LoadIcon(NULL, IDI_APPLICATION);
 		WndClass.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
 		assert(RegisterClassEx(&WndClass));
-		Window = CreateWindow(WndClass.lpszClassName, "timen", WS_MINIMIZE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, hInstance, 0);
+		Window = CreateWindow(WndClass.lpszClassName, L"timen", WS_MINIMIZE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, hInstance, 0);
 		assert(Window != INVALID_HANDLE_VALUE);
 		SetWindowLongPtr(Window, GWLP_USERDATA, (LONG_PTR)&WD);
 
@@ -704,7 +713,7 @@ DWORD WINAPI NotifIconThread(void *Args)
 		NotifIcon.hIcon = LoadIcon(NULL, IDI_APPLICATION);
 		NotifIcon.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
 		NotifIcon.uCallbackMessage = WM_USER_SHELLICON;
-		strcpy_s(NotifIcon.szTip, ArrayLength(NotifIcon.szTip), "timen");
+		wcscpy_s(NotifIcon.szTip, ArrayLength(NotifIcon.szTip), L"timen");
 		assert(Shell_NotifyIcon(NIM_ADD, &NotifIcon));
 	}
 
