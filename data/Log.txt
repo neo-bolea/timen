@@ -1,32 +1,60 @@
-timen (Debugging) - Microsoft Visual Studio
-0
-1
-
 timen (Running) - Microsoft Visual Studio
 0
-1
+0.615468
 
-Idle
--1
+Task Switching
 1
-
-timen (Running) - Microsoft Visual Studio
-0
-6
+0.100638
 
 Reload
 2
-2
+1.610403
 
 *P:\C++\timen\data\Log.txt - Notepad++
 2
-7
+3.318922
 
 Idle
 -1
-4
+2.512428
+
+*P:\C++\timen\data\Log.txt - Notepad++
+2
+1.109107
+
+Task Switching
+1
+0.805576
+
+Unknown
+1
+0.100268
 
 timen (Running) - Microsoft Visual Studio
 0
-5
+1.307372
+
+Unknown
+1
+1.608295
+
+Task Switching
+1
+0.101033
+
+timen (Running) - Microsoft Visual Studio
+0
+1.708076
+
+Unknown
+1
+1.709083
+
+timen (Running) - Microsoft Visual Studio
+0
+1.105241
+
+Unknown
+1
+0.503170
 

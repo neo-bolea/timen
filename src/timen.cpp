@@ -37,7 +37,7 @@ typedef double f64;
 	0
 #else
 #define assert(Expr) \
-	Expr;              \
+	(Expr);              \
 	0
 #endif
 #define ArrayLength(Array) (sizeof(Array) / sizeof(Array[0]))
@@ -274,14 +274,11 @@ ui32 ProcessProcSym(proc_sym_table *Syms, const char *Str)
 	}
 }
 
-void LogProgram(HANDLE File, const char *Title, i32 Symbol, LARGE_INTEGER ProcBegin, LARGE_INTEGER ProcEnd, LARGE_INTEGER QueryFreq)
+void LogProgram(HANDLE File, const char *Title, i32 Symbol, f32 fProcTime)
 {
-	f32 fProcTime = ((f32)(ProcEnd.QuadPart - ProcBegin.QuadPart) / (f32)QueryFreq.QuadPart);
-	assert(fProcTime > 0.001f);
-	i32 ProcTime = (i32)fProcTime;
-
+	assert(strlen(Title));
 	char LogBuffer[256];
-	wsprintf(LogBuffer, "%s%s%i%s%i%s%s", Title, EOLStr, Symbol, EOLStr, ProcTime, EOLStr, EOLStr); // TODO: Log at sub-second precision?
+	sprintf_s(LogBuffer, "%s%s%i%s%f%s%s", Title, EOLStr, Symbol, EOLStr, fProcTime, EOLStr, EOLStr); // TODO: Log at sub-second precision?
 	i32 LogLen = (i32)strlen(LogBuffer);
 
 	DWORD BytesWritten;
@@ -307,6 +304,13 @@ bool GetActiveProgramInfo(HWND ActiveWin, char *ProcBuf, ui32 ProcBufLen)
 	return false;
 }
 
+// TODO: Remove this macro once time-precision debugging is finished.
+#define UPDATE_TIME_CHECK()                                                                                        \
+	QueryPerformanceCounter(&WholeProgramEnd);                                                                       \
+	f64 TotalProgramTime = ((f64)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (f64)QueryFreq.QuadPart); \
+	f64 TimeError = TotalProgramTime - AccumTime;                                                                    \
+	assert(TimeError < 0.2f); // TODO: Fix
+
 std::atomic_bool Running = true;
 DWORD WINAPI NotifIconThread(void *Args);
 
@@ -331,11 +335,15 @@ int __stdcall WinMain(HINSTANCE hInstance,
 	// By filling with zero we assure that unused symbol slots will be overwritten (since they will have a timestamp of 0, the oldest number)
 	memset(&Symbols, 0, sizeof(proc_sym_table));
 
-	const ui32 SleepS = 1;
-	const i32 InactivityThreshS = 2;
+	const ui32 SleepMS = 100;
+	const i32 InactivityThreshMS = 2000;
 	if(PathFileExists(LogFilename))
 	{
+#ifdef DEBUG
+		assert(DeleteFile(LogFilename));
+#else
 		assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_NORMAL));
+#endif
 	}
 	HANDLE LogFile = CreateFile(LogFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	assert(LogFile != INVALID_HANDLE_VALUE);
@@ -370,8 +378,13 @@ int __stdcall WinMain(HINSTANCE hInstance,
 	bool ProgramValid = false;
 
 	DWORD PrevLastInput = 0;
-	ui64 LastInputTime = 0;
+	ui64 IdleTime = 0;
 	i32 ProcSymValue;
+
+	LARGE_INTEGER WholeProgramBegin = {}, WholeProgramEnd = {};
+	QueryPerformanceCounter(&WholeProgramBegin);
+	f64 AccumTime = 0.0f;
+
 	while(Running)
 	{
 		// By not directly using LastInputInfo's time, only comparing to it, we prevent overflow problems for integers.
@@ -380,22 +393,30 @@ int __stdcall WinMain(HINSTANCE hInstance,
 		if(PrevLastInput != LastInputInfo.dwTime)
 		{
 			PrevLastInput = LastInputInfo.dwTime;
-			LastInputTime = SleepS;
+			IdleTime = SleepMS;
 		}
 		else
 		{
-			LastInputTime += SleepS;
+			IdleTime += SleepMS;
 		}
 
 
-		bool IsIdle = (LastInputTime >= InactivityThreshS);
+		bool IsIdle = (IdleTime >= InactivityThreshMS);
 
 		if(WasIdle && !IsIdle)
 		{
 			QueryPerformanceCounter(&ProcEnd);
 
+			f32 fProcTime = ((f32)(ProcEnd.QuadPart - ProcBegin.QuadPart) / (f32)QueryFreq.QuadPart);
+			fProcTime += (f32)IdleTime / 1000.0f;
+			assert(fProcTime > 0.001f);
+#ifdef DEBUG
+			AccumTime += fProcTime;
+			UPDATE_TIME_CHECK();
+#endif
+
 			// Log the idling time
-			LogProgram(LogFile, "Idle", -1, ProcBegin, ProcEnd, QueryFreq);
+			LogProgram(LogFile, "Idle", -1, fProcTime);
 		}
 
 		// If the user isn't idle, check if the program changed
@@ -407,6 +428,11 @@ int __stdcall WinMain(HINSTANCE hInstance,
 			if(ActiveWin = GetForegroundWindow())
 			{
 				GetWindowText(ActiveWin, NewTitle, ArrayLength(NewTitle));
+				if(!*NewTitle)
+				{
+					strcpy_s(NewTitle, "Unknown");
+				}
+
 				if(strcmp(CurTitle, NewTitle) != 0)
 				{
 					ProgramChanged = true;
@@ -419,6 +445,17 @@ int __stdcall WinMain(HINSTANCE hInstance,
 		{
 			QueryPerformanceCounter(&ProcEnd);
 
+#ifdef DEBUG
+			if(ProgramChanged)
+			{
+				f32 fProcTime = ((f32)(ProcEnd.QuadPart - ProcBegin.QuadPart) / (f32)QueryFreq.QuadPart);
+				assert(fProcTime > 0.001f);
+
+				AccumTime += fProcTime;
+				UPDATE_TIME_CHECK();
+			}
+#endif
+
 			if(ProgramValid)
 			{
 				// Convert process name to a symbol
@@ -427,8 +464,11 @@ int __stdcall WinMain(HINSTANCE hInstance,
 				i32 FileValue = FindSymbolInFile(&Symbols, ProcName);
 				assert(FileValue == ProcSymValue);
 
+				f32 fProcTime = ((f32)(ProcEnd.QuadPart - ProcBegin.QuadPart) / (f32)QueryFreq.QuadPart);
+				assert(fProcTime > 0.001f);
+
 				// Log the result
-				LogProgram(LogFile, CurTitle, ProcSymValue, ProcBegin, ProcEnd, QueryFreq);
+				LogProgram(LogFile, CurTitle, ProcSymValue, fProcTime);
 			}
 
 			QueryPerformanceCounter(&ProcBegin);
@@ -437,7 +477,7 @@ int __stdcall WinMain(HINSTANCE hInstance,
 			if(ProgramChanged)
 			{
 				// A program whose title or process name we can't decipher is not valid
-				ProgramValid = GetActiveProgramInfo(ActiveWin, CurProcBuf, ArrayLength(CurProcBuf));
+				ProgramValid = strlen(NewTitle) && GetActiveProgramInfo(ActiveWin, CurProcBuf, ArrayLength(CurProcBuf));
 			}
 			else
 			{
@@ -449,9 +489,16 @@ int __stdcall WinMain(HINSTANCE hInstance,
 		WasIdle = IsIdle;
 
 		printf("Next...\n");
-		// TODO: Sleep so that each second (or whatever interval) is perfectly matched, especially in the long run (e.g. 1:15.501 to 4:40.501 at 1s intervals)
-		Sleep(1000 * SleepS);
+		if(Running)
+		{
+			// TODO: Sleep so that each second (or whatever interval) is perfectly matched, especially in the long run (e.g. 1:15.501 to 4:40.501 at 1s intervals)
+			Sleep(SleepMS);
+		}
 	}
+
+	f64 TotalProgramTime = ((f64)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (f64)QueryFreq.QuadPart);
+	f64 TimeError = TotalProgramTime - AccumTime;
+	assert(TimeError < 0.2f); // TODO: Fix time-precision problems (including UPDATE_TIME_CHECK())
 
 	assert(WaitForSingleObject(ThreadHnd, 1000) != WAIT_TIMEOUT);
 
