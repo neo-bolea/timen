@@ -41,32 +41,58 @@ int main(int argc, char** argv)
 	char RestOfFilename[MAX_EXE_NAME];
 	StrCpyN(RestOfFilename, OrigFilename, (int)(StrChr(OrigFilename, '.') - OrigFilename) + 1);
 
-	char OldFilename[MAX_EXE_NAME];
-	char NewFilename[MAX_EXE_NAME];
-	StrCpy(OldFilename, OrigFilename);
-	int Iter = 0;
-	char* OldFilePtr = OldFilename, * NewFilePtr = NewFilename;
-	while (Iter < ProcCount)
+	//char OldFilename[MAX_EXE_NAME];
+	//char NewFilename[MAX_EXE_NAME];
+	//StrCpy(OldFilename, OrigFilename);
+	//int Iter = 0;
+	//char* OldFilePtr = OldFilename, * NewFilePtr = NewFilename;
+	//while (Iter < ProcCount)
+	//{
+	//	sprintf(NewFilePtr, "%s%i.exe", RestOfFilename, Iter);
+	//	printf("Moving %s, %s\n", OldFilePtr, NewFilePtr);
+	//	if (!MoveFile(OldFilePtr, NewFilePtr))
+	//	{
+	//		printf("AAAHH COULDNT MOVE, %i\n", GetLastError());
+	//		getchar();
+	//		return;
+	//	}
+	//	Iter++;
+	//
+	//	char* Tmp = OldFilePtr;
+	//	OldFilePtr = NewFilePtr;
+	//	NewFilePtr = Tmp;
+	//
+	//	if (SleepMS)
+	//	{
+	//		Sleep(SleepMS);
+	//	}
+	//}
+
+	if (SleepMS)
 	{
-		sprintf(NewFilePtr, "%s%i.exe", RestOfFilename, Iter);
-		printf("Moving %s, %s\n", OldFilePtr, NewFilePtr);
-		if (!MoveFile(OldFilePtr, NewFilePtr))
-		{
-			printf("AAAHH COULDNT MOVE, %i\n", GetLastError());
-			getchar();
-			return;
-		}
-		Iter++;
-
-		char* Tmp = OldFilePtr;
-		OldFilePtr = NewFilePtr;
-		NewFilePtr = Tmp;
-
-		if (SleepMS)
-		{
-			Sleep(SleepMS);
-		}
+		Sleep(SleepMS);
 	}
 
-	Assert(MoveFile(OldFilePtr, OrigFilename));
+	char NewFilename[MAX_EXE_NAME];
+	sprintf(NewFilename, "%s%i.exe", RestOfFilename, 0);
+	CopyFile(OrigFilename, NewFilename, true);
+
+	HANDLE NextProc;
+	int delay = 10;
+	while ((NextProc = CreateFile (NewFilename, GENERIC_EXECUTE, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL)) == INVALID_HANDLE_VALUE)
+	{
+		if (GetLastError() == ERROR_SHARING_VIOLATION) {
+			Sleep (delay);
+			if (delay < 5120) // max delay approx 5.Sec
+				delay *= 2;
+		}
+		else
+			break; // some other error occurred
+	}
+
+	STARTUPINFO StartupInfo;
+	PROCESS_INFORMATION ProcInfo;
+	assert(CreateProcess(NewFilename, 0, 0, 0, false, 0, 0, 0, &StartupInfo, &ProcInfo));
+
+
 }

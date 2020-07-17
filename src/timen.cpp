@@ -552,6 +552,22 @@ int __stdcall WinMain(HINSTANCE hInstance,
 			}
 #endif
 
+			/*
+				If the user is becoming idle, we need to 'reclaim' the time that we counted as program time and
+				instead add it to the idle time, since we couldn't know if the user was idle until a idling 
+				certain threshold was met.
+				We don't need to concern ourselves with whether the idling time goes over a previous program,
+				and thus we'd need to delete this whole programs entry, since the program switchting itself
+				means that the user isn't idle. So idling time can only affect the current program entry.
+			*/
+			// Here we only reclaim the time. After the program is logged, we can add the idle time to the
+			// then unused ProcBegin (if we added it now we would add the reclaimed time back to the program).
+			if(!WasIdle && IsIdle)
+			{
+				ProcEnd.QuadPart -= IdleTime * QueryFreq.QuadPart / 1000;
+				assert(ProcEnd.QuadPart - ProcBegin.QuadPart > 0);
+			}
+
 			if(ProgramValid)
 			{
 				// Convert process name to a symbol
@@ -570,6 +586,12 @@ int __stdcall WinMain(HINSTANCE hInstance,
 
 			QueryPerformanceCounter(&ProcBegin);
 			strcpy_s(CurTitle, NewTitle);
+
+			// Now we can add the reclaimed idling time (see above).
+			if(!WasIdle && IsIdle)
+			{
+				ProcBegin.QuadPart -= IdleTime * QueryFreq.QuadPart / 1000;
+			}
 
 			if(ProgramChanged)
 			{
