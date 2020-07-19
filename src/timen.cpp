@@ -7,7 +7,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <Psapi.h>
-#include <rpc.h>
 #include <shellapi.h>
 #include <Shlwapi.h>
 #include <UIAutomation.h>
@@ -41,7 +40,7 @@ typedef double f64;
 #define assert(Expr) \
 	if(!(Expr))        \
 	{                  \
-		*(i32 *)0 = 0;   \
+		throw 0;         \
 	}                  \
 	0
 #else
@@ -58,8 +57,8 @@ typedef double f64;
 	}                                                 \
 	0
 
-#define MAX(A, B) ((A) < (B)) ? (B) : (A)
-#define MIN(A, B) ((A) < (B)) ? (A) : (B)
+#define MAX(A, B) (((A) < (B)) ? (B) : (A))
+#define MIN(A, B) (((A) < (B)) ? (A) : (B))
 
 #pragma region String Helpers
 void StrECpy(char *Dst, const char *Src, char EndChar)
@@ -331,10 +330,16 @@ ui32 ProcessProcSym(proc_sym_table *Syms, const char *Str)
 	}
 }
 
-void LogProgram(HANDLE File, const char *Title, i32 ProcSymbol, const char *Info, f32 fProcTime)
+void LogProgram(HANDLE File, char *Title, i32 ProcSymbol, const char *Info, f32 fProcTime)
 {
-	assert(strlen(Title));
-	char LogBuffer[256];
+	ui64 TitleLen = strlen(Title);
+	assert(TitleLen);
+	// TODO: Fix this (this was a temp fix).
+	char LogBuffer[1024];
+	if(TitleLen > 1000)
+	{
+		Title[1000] = '\0';
+	}
 	sprintf_s(LogBuffer, "%s%s%i%s%s%s%f%s%s", Title, EOLStr, ProcSymbol, EOLStr, Info, EOLStr, fProcTime, EOLStr, EOLStr); // TODO: Log at sub-second precision?
 	i32 LogLen = (i32)strlen(LogBuffer);
 
@@ -368,7 +373,7 @@ bool GetActiveProgramInfo(HWND ActiveWin, char *ProcBuf, ui32 ProcBufLen)
 	QueryPerformanceCounter(&WholeProgramEnd);                                                                       \
 	f64 TotalProgramTime = ((f64)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (f64)QueryFreq.QuadPart); \
 	f64 TimeError = TotalProgramTime - AccumTime;                                                                    \
-	assert(TimeError < 0.2f); // TODO: Fix
+	assert(TimeError < 0.2f);
 
 std::atomic_bool Running = true;
 DWORD WINAPI NotifIconThread(void *Args);
@@ -408,9 +413,9 @@ void GetActiveTab(HWND Wnd)
 }
 
 int __stdcall WinMain(HINSTANCE hInstance,
-											HINSTANCE hPrevInstance,
-											LPSTR lpCmdLine,
-											int nShowCmd)
+									 HINSTANCE hPrevInstance,
+									 LPSTR lpCmdLine,
+									 int nShowCmd)
 {
 	DWORD ThreadID;
 	HANDLE ThreadHnd = CreateThread(0, 0, NotifIconThread, hInstance, 0, &ThreadID);
@@ -427,9 +432,6 @@ int __stdcall WinMain(HINSTANCE hInstance,
 	// By filling with zero we assure that unused symbol slots will be overwritten (since they will have a timestamp of 0, the oldest number)
 	memset(&Symbols, 0, sizeof(proc_sym_table));
 
-	// TODO: Switch to second granularity once finished debugging. Also log seconds, not milliseconds.
-	const ui32 SleepMS = 100;
-	const i32 InactivityThreshMS = 2000;
 	if(PathFileExists(LogFilename))
 	{
 #ifdef DEBUG
@@ -463,16 +465,34 @@ int __stdcall WinMain(HINSTANCE hInstance,
 		}
 	}
 
+	// TODO: Switch to second granularity once finished debugging. Also log seconds, not milliseconds.
+	const ui32 SleepMS = 100;
+	const ui32 InactivityThreshMS = 2000;
+	const ui32 MinProgTimeMS = 50;
+
+	// Windows Filetime is in 100 nanoseconds intervals
+	ui32 MSToFiletime = 10000;
+	ui32 Sleep100NS = SleepMS * MSToFiletime;
+
+	FILETIME SysTimeFile;
+	GetSystemTimeAsFileTime(&SysTimeFile);
+	ULARGE_INTEGER SysTime = ULARGE_INTEGER{SysTimeFile.dwLowDateTime, SysTimeFile.dwHighDateTime};
+
+	// Calculates the time remainder the timer should adhere to. See Sleep() below for further explanations.
+	ui64 TimePrecisionRem = SysTime.QuadPart % (Sleep100NS);
+	ui64 Iterations = 0;
+	ui64 TimeErrorCount = 0, IndivTimeErrorCount = 0;
+
 	LARGE_INTEGER QueryFreq;
 	QueryPerformanceFrequency(&QueryFreq);
 	LARGE_INTEGER ProcBegin = {}, ProcEnd = {};
 	bool WasIdle = false;
-	char CurTitle[MAX_PATH] = "\0", CurProcBuf[MAX_PATH] = "\0";
+	char CurTitle[MAX_PATH + 100] = "\0", CurProcBuf[MAX_PATH] = "\0";
 	bool ProgramValid = false;
 
 	DWORD PrevLastInput = 0;
 	ui64 IdleTime = 0;
-	i32 ProcSymValue;
+	ui32 ProcSymValue;
 
 	LARGE_INTEGER WholeProgramBegin = {}, WholeProgramEnd = {};
 	QueryPerformanceCounter(&WholeProgramBegin);
@@ -480,6 +500,7 @@ int __stdcall WinMain(HINSTANCE hInstance,
 
 	while(Running)
 	{
+		// TODO: Add code to detect whether a video is playing, and don't count watching videos as idle time.
 		// By not directly using LastInputInfo's time, only comparing to it, we prevent overflow problems for integers.
 		LASTINPUTINFO LastInputInfo = {sizeof(LASTINPUTINFO), 0};
 		assert(GetLastInputInfo(&LastInputInfo));
@@ -493,9 +514,9 @@ int __stdcall WinMain(HINSTANCE hInstance,
 			IdleTime += SleepMS;
 		}
 
-
 		bool IsIdle = (IdleTime >= InactivityThreshMS);
 
+		// If idling time finished, log it
 		if(WasIdle && !IsIdle)
 		{
 			QueryPerformanceCounter(&ProcEnd);
@@ -508,20 +529,21 @@ int __stdcall WinMain(HINSTANCE hInstance,
 			UPDATE_TIME_CHECK();
 #endif
 
-			// Log the idling time
 			LogProgram(LogFile, "Idle", -1, "-", fProcTime);
 		}
 
 		// If the user isn't idle, check if the program changed
 		bool ProgramChanged = false;
-		char NewTitle[MAX_PATH] = "\0";
+		char NewTitle[MAX_PATH + 100] = "\0";
 		wchar_t NewTitleW[MAX_PATH] = L"\0";
 		HWND ActiveWin = {};
 		if(!IsIdle)
 		{
 			if(ActiveWin = GetForegroundWindow())
 			{
+				// TODO: Use WM_GETTEXT instead?
 				GetWindowText(ActiveWin, NewTitleW, ArrayLength(NewTitleW));
+				// TODO: Fix buffer overflows in WideCharToMultiByte (increasing CurTitle & NewTitle buffer size was a temp fix) and allow much larger title lengths (since Windows allows infinite length titles).
 				NarrowUTF(NewTitle, ArrayLength(NewTitle), NewTitleW);
 
 				if(!*NewTitle)
@@ -536,7 +558,8 @@ int __stdcall WinMain(HINSTANCE hInstance,
 			}
 		}
 
-		// If the active process is changing or the user is becoming idle, log the last active process
+		// If the active process is changing or the user is becoming idle, log the last active process.
+		// Note that these conditions are exclusive, and are assumed as such in the following code.
 		if(ProgramChanged || (!WasIdle && IsIdle))
 		{
 			QueryPerformanceCounter(&ProcEnd);
@@ -544,8 +567,7 @@ int __stdcall WinMain(HINSTANCE hInstance,
 #ifdef DEBUG
 			if(ProgramChanged)
 			{
-				f32 fProcTime = ((f32)(ProcEnd.QuadPart - ProcBegin.QuadPart) / (f32)QueryFreq.QuadPart);
-				assert(fProcTime > 0.001f);
+				f64 fProcTime = ((f64)(ProcEnd.QuadPart - ProcBegin.QuadPart) / (f64)QueryFreq.QuadPart);
 
 				AccumTime += fProcTime;
 				UPDATE_TIME_CHECK();
@@ -565,33 +587,49 @@ int __stdcall WinMain(HINSTANCE hInstance,
 			if(!WasIdle && IsIdle)
 			{
 				ProcEnd.QuadPart -= IdleTime * QueryFreq.QuadPart / 1000;
-				assert(ProcEnd.QuadPart - ProcBegin.QuadPart > 0);
+				//assert(ProcEnd.QuadPart - ProcBegin.QuadPart > -(i32)SleepMS * QueryFreq.QuadPart / 1000);
+				ProcEnd.QuadPart = MAX(ProcEnd.QuadPart, ProcBegin.QuadPart);
 			}
 
+			LARGE_INTEGER LastProgTimeAdded = {};
 			if(ProgramValid)
 			{
 				// Convert process name to a symbol
 				char *ProcName = strrchr(CurProcBuf, '\\') + 1;
 				ProcSymValue = ProcessProcSym(&Symbols, ProcName);
-				i32 FileValue = FindSymbolInFile(&Symbols, ProcName);
+				ui32 FileValue = FindSymbolInFile(&Symbols, ProcName);
 				assert(FileValue == ProcSymValue);
 
+				// TODO: Use integer time
 				f32 fProcTime = ((f32)(ProcEnd.QuadPart - ProcBegin.QuadPart) / (f32)QueryFreq.QuadPart);
-				assert(fProcTime > 0.001f);
-
-				// TODO: Add extra info to certain windows (e.g. tab/site info for browsers).
-				// Log the result
-				LogProgram(LogFile, CurTitle, ProcSymValue, "-", fProcTime);
+				if(fProcTime * 1000.0f >= MinProgTimeMS)
+				{
+					// TODO: Don't log title if it proves to be unnecessary (especially since titles use up a lot of memory....
+					// TODO: Add extra info to certain windows (e.g. tab/site info for browsers).
+					// Log the result
+					LogProgram(LogFile, CurTitle, ProcSymValue, "-", fProcTime);
+				}
+				else
+				{
+					// If the amount of time this program was active for is too short to log, add it to the next program time.
+					LastProgTimeAdded.QuadPart = (ui64)(fProcTime * QueryFreq.QuadPart);
+				}
 			}
 
+			// Log the starting point of the next program / idling time
 			QueryPerformanceCounter(&ProcBegin);
-			strcpy_s(CurTitle, NewTitle);
+			if(LastProgTimeAdded.QuadPart)
+			{
+				ProcBegin.QuadPart += LastProgTimeAdded.QuadPart;
+			}
+
 
 			// Now we can add the reclaimed idling time (see above).
 			if(!WasIdle && IsIdle)
 			{
 				ProcBegin.QuadPart -= IdleTime * QueryFreq.QuadPart / 1000;
 			}
+
 
 			if(ProgramChanged)
 			{
@@ -600,18 +638,56 @@ int __stdcall WinMain(HINSTANCE hInstance,
 			}
 			else
 			{
-				// Idle is not a valid program
+				// Idle does not count as a valid program
 				ProgramValid = false;
 			}
+
+
+			strcpy_s(CurTitle, NewTitle);
 		}
 
 		WasIdle = IsIdle;
 
-		printf("Next...\n");
 		if(Running)
 		{
-			// TODO: Sleep so that each second (or whatever interval) is perfectly matched, especially in the long run (e.g. 1:15.501 to 4:40.501 at 1s intervals)
-			Sleep(SleepMS);
+			// TODO: Once file checkpoints have been implemented, explain why perfect long-time precision is important.
+			/*
+				Sleep() doesn't guarantee perfect time precision, and these imprecisions can stack up to very
+				high numbers over time. Here we try to manually correct these imprecisions.
+				Example: If the sleep interval is one second, we try to keep the intervals at exactly one second.
+					We do that by trying to keep the remainder of the second right (i.e. here in milliseconds):
+					If the milliseconds for the first iteration is .517s, we try to continue that pattern:
+					1.517s, 2.517s, etc. If the remainder is .520s, we sleep 3ms less.
+			*/
+			FILETIME TimeNowFile;
+			GetSystemTimeAsFileTime(&TimeNowFile);
+			ULARGE_INTEGER TimeNow{TimeNowFile.dwLowDateTime, TimeNowFile.dwHighDateTime};
+
+			ui64 TimeRem = TimeNow.QuadPart % (Sleep100NS);
+			assert(TimeRem < INT64_MAX);
+			i32 TimeCorrection = (i32)(((i64)TimeRem - (i64)TimePrecisionRem) / MSToFiletime);
+			i64 TotalTimeError = (i64)(TimeNow.QuadPart / MSToFiletime) - ((i64)(SysTime.QuadPart + Iterations++ * SleepMS * MSToFiletime) / MSToFiletime);
+
+			SYSTEMTIME ProfTime;
+			FileTimeToSystemTime(&TimeNowFile, &ProfTime);
+			printf("Time: %i:%i.%i, to recover: %ims, error: %ims\n", ProfTime.wMinute, ProfTime.wSecond, ProfTime.wMilliseconds, TimeCorrection, (i32)TotalTimeError);
+
+			persist bool LastWasError = false;
+			if(TotalTimeError < SleepMS)
+			{
+				Sleep(SleepMS - TimeCorrection);
+				LastWasError = false;
+			}
+			else
+			{
+				if(!LastWasError)
+				{
+					IndivTimeErrorCount++;
+				}
+
+				TimeErrorCount++;
+				LastWasError = true;
+			}
 		}
 	}
 
@@ -628,8 +704,6 @@ int __stdcall WinMain(HINSTANCE hInstance,
 	assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_READONLY));
 	assert(SetFileAttributes(SymFilename, FILE_ATTRIBUTE_READONLY));
 #endif
-
-	// TODO: Save text files.
 
 	return 0;
 }
@@ -725,13 +799,10 @@ DWORD WINAPI NotifIconThread(void *Args)
 
 		WD.NotifIcon = &NotifIcon;
 
-		UUID IconUuid;
-		assert(UuidCreateSequential(&IconUuid) == RPC_S_OK);
-
 		memset(&NotifIcon, 0, sizeof(NOTIFYICONDATA));
 		NotifIcon.cbSize = sizeof(NOTIFYICONDATA);
 		NotifIcon.hWnd = Window;
-		NotifIcon.uID = IconUuid.Data1;
+		NotifIcon.uID = 0;
 		NotifIcon.hIcon = LoadIcon(NULL, IDI_APPLICATION);
 		NotifIcon.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
 		NotifIcon.uCallbackMessage = WM_USER_SHELLICON;
