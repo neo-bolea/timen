@@ -236,15 +236,15 @@ HANDLE DebugConsole;
 */
 void LogV(timen_event Event, ui8 Color, const char *Format, va_list Args)
 {
-	persist timen_event LastEvent = TE_None;
-	assert(Event != TE_None);
-	assert(Event != LastEvent);
-	LastEvent = Event;
-
 	printf((Event == TE_Reaction) ? "React:  " : "\nAction: ");
 	SetConsoleTextAttribute(DebugConsole, Color);
 	vprintf(Format, Args);
 	SetConsoleTextAttribute(DebugConsole, 0x07);
+
+	persist timen_event LastEvent = TE_None;
+	assert(Event != TE_None);
+	assert(Event != LastEvent);
+	LastEvent = Event;
 }
 #else
 void LogV(timen_event Event, ui8 Color, const char *Format, va_list Args)
@@ -400,7 +400,7 @@ ui32 ProcessProcSym(proc_sym_table *Syms, const char *Str)
 	}
 }
 
-void LogProgram(HANDLE File, char *Title, i32 ProcSymbol, const char *Info, f32 fProcTime)
+void LogProgram(HANDLE File, char *Title, i32 ProcSymbol, const char *Info, f64 fProcTime)
 {
 	ui64 TitleLen = strlen(Title);
 	assert(TitleLen);
@@ -475,19 +475,7 @@ void GetActiveTab(HWND Wnd)
 
 // TODO: Remove this macro once time-precision debugging is finished.
 #ifdef DEBUG
-global f64 AccumTime = 0.0f;
-#define ASSURE_TIME_PRECISION(TimeToAdd)                                                                           \
-	AccumTime += TimeToAdd;                                                                                          \
-	QueryPerformanceCounter(&WholeProgramEnd);                                                                       \
-	f64 TotalProgramTime = ((f64)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (f64)QueryFreq.QuadPart); \
-	f64 TimeError = fabs(TotalProgramTime - AccumTime);                                                              \
-	if(TimeError >= 0.2f)                                                                                            \
-	{                                                                                                                \
-		printf("AAAAAHHH: %f\n", TimeError);                                                                           \
-		assert(false);                                                                                                 \
-	}
-#else
-#define ASSURE_TIME_PRECISION(TimeToAdd) 0
+global f64 AccumTimeMS = 0.0f;
 #endif
 
 std::atomic_bool Running = true;
@@ -572,12 +560,12 @@ int __stdcall main(HINSTANCE hInstance,
 	QueryPerformanceFrequency(&QueryFreq);
 	LARGE_INTEGER LastProcBegin = {}, ProcBegin = {}, ProcEnd = {};
 	bool WasIdle = false;
-	char LastTitle[MAX_PATH + 100], CurTitle[MAX_PATH + 100] = "\0", CurProcBuf[MAX_PATH] = "\0";
-	bool ProgramValid = false;
+	char CurTitle[MAX_PATH + 100] = "\0", CurProcBuf[MAX_PATH] = "\0";
+	bool ActivityValid = false;
 
 	DWORD PrevLastInput = 0;
 	ui64 IdleTime = 0;
-	ui32 ProcSymValue;
+	i32 ProcSymValue;
 
 	LARGE_INTEGER WholeProgramBegin = {}, WholeProgramEnd = {};
 	QueryPerformanceCounter(&WholeProgramBegin);
@@ -603,15 +591,15 @@ int __stdcall main(HINSTANCE hInstance,
 		bool SwitchFromIdle = (WasIdle && !IsIdle);
 
 		// If the user isn't idle, check if the program changed
-		bool ProgramIsChanging = false;
+		bool ProgramChange = false;
 		char NewTitle[MAX_PATH + 100];
-		wchar_t NewTitleW[MAX_PATH];
 		ui32 NewTitleLen = 0;
 		HWND ActiveWin = {};
 		if(!IsIdle)
 		{
 			if(ActiveWin = GetForegroundWindow())
 			{
+				wchar_t NewTitleW[MAX_PATH];
 				NewTitleLen = GetWindowText(ActiveWin, NewTitleW, ArrayLength(NewTitleW));
 				// TODO: Fix buffer overflows in WideCharToMultiByte (increasing CurTitle & NewTitle buffer size was a temp fix) and allow much larger title lengths (since Windows allows infinite length titles).
 
@@ -626,37 +614,25 @@ int __stdcall main(HINSTANCE hInstance,
 
 				if(strcmp(CurTitle, NewTitle) != 0)
 				{
-					ProgramIsChanging = true;
+					ProgramChange = true;
 				}
 			}
 		}
+		else if(SwitchToIdle)
+		{
+			strcpy_s(NewTitle, "Idle");
+		}
+
+		bool ActivityChange = ProgramChange || SwitchToIdle || SwitchFromIdle;
 
 		// If the active process is changing or the user is becoming idle, log the last active process.
 		// NOTE that these conditions are exclusive, and ARE ASSUMED AS SUCH in the following code.
-		LARGE_INTEGER NewProcBegin = {};
-		if(ProgramIsChanging || SwitchToIdle || SwitchFromIdle)
+		if(ActivityChange)
 		{
-			assert(ProgramIsChanging != SwitchToIdle);
-
-			// TODO NOW: Merge this next statement with identical one above (expand NewProcBegin scope?)
 			QueryPerformanceCounter(&ProcEnd);
-			NewProcBegin = ProcEnd;
-		}
+			LARGE_INTEGER NextProcBegin = ProcEnd;
 
-		// If idling time finished, log it
-		if(SwitchFromIdle)
-		{
-			f32 fProcTime = ((f32)(ProcEnd.QuadPart - ProcBegin.QuadPart) / (f32)QueryFreq.QuadPart);
-			fProcTime += (f32)IdleTime / 1000.0f;
-			assert(fProcTime > 0.001f);
-
-			LogProgram(LogFile, "Idle", -1, "-", fProcTime);
-			Log(TE_Action, "Switching from 'Idle' to '%s'\n", NewTitle);
-
-			ASSURE_TIME_PRECISION(fProcTime);
-		}
-
-		/*
+			/*
 				If the user is becoming idle, we need to 'reclaim' the time that we counted as program time and
 				instead add it to the idle time, since we couldn't know if the user was idle until the idling 
 				threshold was met.
@@ -667,148 +643,71 @@ int __stdcall main(HINSTANCE hInstance,
 				and thus we'd need to delete this whole programs entry, since the program switchting itself
 				means that the user isn't idle. So idling time can only affect the current program entry.
 			*/
-		if(SwitchToIdle)
-		{
-			ui64 AddedIdleTime = IdleTime * QueryFreq.QuadPart / 1000;
-			ProcEnd.QuadPart -= AddedIdleTime;
-			//assert(ProcEnd.QuadPart - ProcBegin.QuadPart > -(i32)SleepMS * QueryFreq.QuadPart / 1000);
-			ProcEnd.QuadPart = MAX(ProcEnd.QuadPart, ProcBegin.QuadPart);
-
-			NewProcBegin.QuadPart -= AddedIdleTime;
-		}
-
-		bool SwitchToNextProg = true;
-		f32 fProcTime = ((f32)(ProcEnd.QuadPart - ProcBegin.QuadPart) / (f32)QueryFreq.QuadPart);
-		if(ProgramIsChanging)
-		{
-			if(ProgramValid) // TODO NOW: CHECKIF
+			if(SwitchToIdle)
 			{
-				// Convert process name to a symbol
-				char *ProcName = strrchr(CurProcBuf, '\\') + 1;
-				ProcSymValue = ProcessProcSym(&Symbols, ProcName);
-				ui32 FileValue = FindSymbolInFile(&Symbols, ProcName);
-				assert(FileValue == ProcSymValue);
+				ui64 AddedIdleTime = IdleTime * QueryFreq.QuadPart / 1000;
+				ProcEnd.QuadPart -= AddedIdleTime;
+				NextProcBegin.QuadPart -= AddedIdleTime;
+			}
 
-				// TODO: Use integer time
-				if(fProcTime * 1000.0f >= MinProgTimeMS)
+			// TODO: Use integer time
+			// Note: The program time can be negative if the user became idle before the program started, so we need to check for that...
+			f64 fProcTime = ((f64)(ProcEnd.QuadPart - ProcBegin.QuadPart) / (f64)QueryFreq.QuadPart);
+			if(ActivityValid && fProcTime > 0)
+			{
+				if(SwitchFromIdle)
 				{
-					// TODO: Don't log title if it proves to be unnecessary (especially since titles use up a lot of memory...).
-					// TODO: Add extra info to certain windows (e.g. tab/site info for browsers).
-					// Log the result
-					LogProgram(LogFile, CurTitle, ProcSymValue, "-", fProcTime);
-					ASSURE_TIME_PRECISION(fProcTime);
+					ProcSymValue = -1;
 				}
 				else
 				{
-					/*
-						TODO: What to do if the next program is the same as the last one? E.g. A for 1s => B for 0.001s => A for 1s. How to merge logs of A to 2s?
-						Possible solution: Store current program info in a struct, and also store the last programs info. 
-							When cur prog is done, log the *prev* program. That way we can make more flexible changes to 
-							last program if we found things we need to change through the cur prog's interactions.
-					*/
-					// TODO NOW: Update comment
-					// If the amount of time this program was active for is too short to log, add it to the next program time.
-					// TODO NOW:dont add, extract and use as current program instead!!!
-					//if(strcmp(LastTitle, NewTitle) == 0 && strcmp(LastTitle, "Task Switching") != 0)
-					//{
-					//	// TODO NOW: program that isnt even logged is being extracted here ?
-					//	assert(LastProcBegin.QuadPart);
-					//
-					//	// Read last part of file, random number of bytes (add a note to say that once float timing in files is removed that number should change)
-					//	// Go three line endings back, read back number
-					//	// Add to number
-					//	// Write back at that spot
-					//
-					//	// TODO: Don't use random buffer length for program log buffer (can also fail if title is too long...)
-					//	char LastProgBuf[512];
-					//	DWORD BytesRead;
-					//	// TODO NOW: File size check + MIN
-					//	LARGE_INTEGER FileSize;
-					//	assert(GetFileSizeEx(LogFile, &FileSize));
-					//	assert(SetFilePointer(LogFile, -(i32)MIN(ArrayLength(LastProgBuf), FileSize.QuadPart), 0, FILE_END) != INVALID_SET_FILE_POINTER);
-					//	assert(ReadFile(LogFile, LastProgBuf, ArrayLength(LastProgBuf), &BytesRead, 0));
-					//	if(BytesRead)
-					//	{
-					//		char *ProgPtr = LastProgBuf + BytesRead;
-					//		i32 TimeBufLen = BytesRead;
-					//		for(ui32 i = 0; i < 6; i++)
-					//		{
-					//			char *ProgLastPtr = StrStrRFind(LastProgBuf, EOLStr, TimeBufLen, EOLLen);
-					//			TimeBufLen += (i32)(ProgLastPtr - ProgPtr);
-					//			ProgPtr = ProgLastPtr;
-					//		}
-					//
-					//		if(ProgPtr)
-					//		{
-					//			ProgPtr++;
-					//		}
-					//		else
-					//		{
-					//			ProgPtr = LastProgBuf;
-					//		}
-					//
-					//		assert(StrCmpEOL(ProgPtr, LastTitle));
-					//		assert(SetFilePointer(LogFile, (i32)(size_t)((ProgPtr - LastProgBuf) - BytesRead), 0, FILE_END) != INVALID_SET_FILE_POINTER);
-					//		assert(SetEndOfFile(LogFile));
-					//
-					//		Log(TE_Reaction, 0x3f, "Expanding last: '%s'\n", LastTitle); // TODO NOW: actually switched to the program to merge after removing it from the file...
-					//
-					//		strcpy_s(CurTitle, LastTitle);
-					//		SwitchToNextProg = false;
-					//		ProcBegin = LastProcBegin;
-					//	}
-					//	else
-					//	{
-					//		NewProcBegin.QuadPart -= (ui64)(fProcTime * QueryFreq.QuadPart);
-					//		Log(TE_Reaction, 0x6f, "Adding short program section to the next program (%fs to '%s').\n", fProcTime, NewTitle);
-					//	}
-					//}
-					//else
+					// Convert process name to a symbol
+					char *ProcName = strrchr(CurProcBuf, '\\') + 1;
+					ProcSymValue = ProcessProcSym(&Symbols, ProcName);
+					i32 FileValue = FindSymbolInFile(&Symbols, ProcName);
+					assert(FileValue == ProcSymValue);
+				}
+
+				// TODO: Don't log title if it proves to be unnecessary (especially since titles use up a lot of memory...).
+				// TODO: Add extra info to certain windows (e.g. tab/site info for browsers).
+				// Log the result
+				LogProgram(LogFile, CurTitle, ProcSymValue, "-", fProcTime);
+
+#ifdef DEBUG
+				// Assert that there are no time leaks (no 'lost' seconds) and that conservation of time is correct
+				AccumTimeMS += fProcTime;
+				if(!SwitchToIdle)
+				{
+					QueryPerformanceCounter(&WholeProgramEnd);
+					f64 TotalProgramTime = ((f64)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (f64)QueryFreq.QuadPart);
+					f64 TimeError = fabs(TotalProgramTime - AccumTimeMS);
+					if(TimeError >= 0.2f)
 					{
-						NewProcBegin.QuadPart -= (ui64)(fProcTime * QueryFreq.QuadPart);
-						Log(TE_Reaction, 0x06, "Adding short program time ('%s' for %fs) to the program ('%s').\n", CurTitle, fProcTime, NewTitle);
+						printf("TIME ERROR: %f (%f not %f)\n", TimeError, AccumTimeMS, TotalProgramTime);
+						assert(false);
+					}
+					else
+					{
+						printf("Time Precision: %f (%f not %f)\n", TimeError, AccumTimeMS, TotalProgramTime);
 					}
 				}
+#endif
 			}
-			else if(*CurTitle)
+			else if(*CurTitle && (fProcTime <= 0 || !ActivityValid))
 			{
-				NewProcBegin.QuadPart -= (ui64)(fProcTime * QueryFreq.QuadPart);
+				NextProcBegin.QuadPart -= (ui64)(fProcTime * QueryFreq.QuadPart);
 				Log(TE_Reaction, 0x04, "Adding invalid program time ('%s' for %fs) to next program ('%s').\n", CurTitle, fProcTime, NewTitle);
 			}
-		}
 
-		if(SwitchToIdle)
-		{
-			// Idle does not count as a valid program
-			ProgramValid = false;
-		}
-		else if(ProgramIsChanging)
-		{
 			// A program whose title or process name we can't decipher is not valid
-			ProgramValid = NewTitleLen && GetActiveProgramInfo(ActiveWin, CurProcBuf, ArrayLength(CurProcBuf));
-		}
+			ActivityValid = IsIdle ||
+											(NewTitleLen && GetActiveProgramInfo(ActiveWin, CurProcBuf, ArrayLength(CurProcBuf)));
 
-		// TODO NOW: Remove if statement?
-		if(ProgramIsChanging && SwitchToNextProg)
-		{
-			strcpy_s(LastTitle, CurTitle);
-			strcpy_s(CurTitle, NewTitle);
-		}
-
-		if(ProgramIsChanging || SwitchToIdle)
-		{
 			LastProcBegin = ProcBegin;
-			ProcBegin = NewProcBegin;
-		}
+			ProcBegin = NextProcBegin;
 
-		// TODO NOW: Merge into one statement
-		if(SwitchToIdle)
-		{
-			Log(TE_Action, "Switching from '%s' to 'Idle'\n", CurTitle);
-		}
-		else if(ProgramIsChanging)
-		{
-			Log(TE_Action, "Switching from '%s' to '%s'\n", LastTitle, CurTitle);
+			Log(TE_Action, "Switching from '%s' to '%s'\n", CurTitle, NewTitle);
+			strcpy_s(CurTitle, NewTitle);
 		}
 
 		WasIdle = IsIdle;
@@ -835,7 +734,7 @@ int __stdcall main(HINSTANCE hInstance,
 
 			SYSTEMTIME ProfTime;
 			FileTimeToSystemTime(&TimeNowFile, &ProfTime);
-			//printf("Time: %i:%i.%i, to recover: %ims, error: %ims, %s\n", ProfTime.wMinute, ProfTime.wSecond, ProfTime.wMilliseconds, TimeCorrection, (i32)TotalTimeError);
+			//printf("Time: %i:%i.%i, to recover: %ims, error: %ims\n", ProfTime.wMinute, ProfTime.wSecond, ProfTime.wMilliseconds, TimeCorrection, (i32)TotalTimeError);
 
 			persist bool LastWasError = false;
 			if(TotalTimeError < SleepMS)
@@ -857,7 +756,7 @@ int __stdcall main(HINSTANCE hInstance,
 	}
 
 	f64 TotalProgramTime = ((f64)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (f64)QueryFreq.QuadPart);
-	f64 TimeError = TotalProgramTime - AccumTime;
+	f64 TimeError = TotalProgramTime - AccumTimeMS;
 	assert(TimeError < 0.2f); // TODO: Fix time-precision problems (including ASSURE_TIME_PRECISION())
 	assert(!TimeErrorCount);
 
