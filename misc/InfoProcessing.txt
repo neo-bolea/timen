@@ -1,0 +1,37 @@
+Input:
+	Each 'activity' (process or idle time) is logged, writing it's name, process ID, extra info (WIP) and time to the log file.
+	
+Output (i.e. what information needs to be extracted):
+	Time that any process has been active over a specific time span.
+	Simplification: the time span composed of a fixed interval of time: day, week, month, year.
+	
+Problem:
+	-Processing every activity could be expensive
+	-No time spans are given (we don't know when an activity happened)
+	
+Possible Solution:
+	-Every x activities, write down the time (include year, day, second, etc.). Since time is conserved perfectly (according to various assertions), we can perfectly calculate the time at which each activity happened (if necessary). X is either a fixed interval, or varies if any of the following events occurs:
+		-A specified unit of time changes (e.g. hour, day), in which case the current activity has to be assumed to be complete, even if it continues (so it can be logged). That activity can start again afterwards.
+		-The program is interrupted (write the next time the program starts)
+	Problem: Where to store these time stamps?
+		A: Same file, and the bytes to the next timestamp is stored: 
+			-Difficult to navigate, since all timestamps need to be visited
+			-Annoying to do correctly, since bytes need to be counted from the last timestamp, every time the program restarts.
+		B: Different file, write the total byte offset (i.e. not relative) to the activity at which a timestamp starts
+			-Easier to reason about, since everything is neatly separated and the logging file format is much simpler (fixed amount of line breaks per activity, nothing else), while the timestamp file format is one timestamp per line.
+			-Very easy to navigate (could also be optimized, by searching in halves instead of from beginning to end), and can be navigated in both directions.
+		B is winner!
+	Problem: How to store timestamp? (warning: remember leap years!!!)
+		A: Full human-readable timestamp (e.g. minute:second/hour/day/month/year):
+			-Easy to read, simple
+		B: Calculate everything in hours:
+			-Very simple from a program perspective
+			-Fast
+		C: A format between A and B (_some_ units are included in others, i.e. only days, no months)
+		For a quick prototype, B will be used (not definite!).
+		
+Opportunity: Since past activities never change, their calculations could be cached in a separate file (e.g. how many hours a program was used in a past month):
+	+ Very fast
+	- Adds complexity
+	- Needs to be recalculated if any behaviour of the program is reconfigured (e.g. if from now on, program A should be ignored on Mondays, then we would need to recalculate everything [or only the necessary stuff, but that sounds very difficult])
+	=> Will only be implemented if optimization is necessary!

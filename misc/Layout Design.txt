@@ -1,0 +1,19 @@
+Options Menu:
+	-Should change based on what is currently selected.
+	-Should be designed as an integral part of the feedback loop, since changing options is very common for this tool.
+	Example:
+		-When a program is selected, the 'options' region changes to options for the program. Options might include: 
+		-Giving the program an alias (instead of process name)
+		-Setting a fixed program color (TODO: all colors should be as spaced out as possible for visibility)
+		-Make invisible in graph? (how would you select it again?)
+
+Further diagram options:
+	Main diagram (larger unit, default graph is called Mosaic or Mekko Charts):
+		-'Stock' chart
+	Side diagram (smaller unit):
+		-Stacked vertical bars
+		
+Very, very far away possible design choices in the future:
+	-Groups of programs, so you can see only a few select programs in the main graph (and can select between different graph types, e.g. stock chart vs stacked default)
+	-Variable time ranges (i.e. not fixed to months, days, etc. but instead from any date to any other date)?
+	
