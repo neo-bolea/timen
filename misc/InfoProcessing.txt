@@ -29,6 +29,7 @@ Possible Solution:
 			-Fast
 		C: A format between A and B (_some_ units are included in others, i.e. only days, no months)
 		For a quick prototype, B will be used (not definite!).
+	Additionally: Byte offsets will be stored in absolute bytes, not relative. That way, we don't need to remember the last place where a timestamp was placed (especially if the program was interrupted), navigation is easier/faster/bidirectional
 		
 Opportunity: Since past activities never change, their calculations could be cached in a separate file (e.g. how many hours a program was used in a past month):
 	+ Very fast

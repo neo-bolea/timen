@@ -1,3 +1,5 @@
+// TODO: Reimplement different EOLs, on a per file basis.
+
 // Visual Studio doesn't know what macros are defined in the build file, so dummy macros are defined here (that aren't actually defined).
 #ifndef VS_DUMMY
 #define DEBUG
@@ -219,11 +221,11 @@ char *InsertEOL(char *Str)
 #pragma region Debug Logging
 enum timen_event
 {
-	TE_None = 0,
+	TE_Other = 0,
 	TE_Reaction, // Synonymous to logging an activity switch
 	TE_Action // Synonymous to switching a program or transitioning into/from idle
 };
-timen_event LastTimenEvent = TE_None;
+timen_event LastTimenEvent = TE_Other;
 
 HANDLE DebugConsole;
 #ifdef DEBUG
@@ -236,13 +238,12 @@ HANDLE DebugConsole;
 */
 void LogV(timen_event Event, ui8 Color, const char *Format, va_list Args)
 {
-	printf((Event == TE_Reaction) ? "React:  " : "\nAction: ");
+	printf((Event == TE_Reaction) ? "React:  " : (Event == TE_Reaction) ? "\nAction: " : "\n");
 	SetConsoleTextAttribute(DebugConsole, Color);
 	vprintf(Format, Args);
 	SetConsoleTextAttribute(DebugConsole, 0x07);
 
-	persist timen_event LastEvent = TE_None;
-	assert(Event != TE_None);
+	persist timen_event LastEvent = TE_Other;
 	assert(Event != LastEvent);
 	LastEvent = Event;
 }
@@ -538,7 +539,8 @@ int __stdcall main(HINSTANCE hInstance,
 		}
 	}
 
-	// TODO: Switch to second granularity once finished debugging. Also log seconds, not milliseconds.
+	// TODO: Switch to second granularity once finished debugging.
+	// TODO: Also log seconds, not milliseconds.
 	const ui32 SleepMS = 100;
 	const ui32 InactivityThreshMS = 2000;
 	const ui32 MinProgTimeMS = 500;
@@ -560,30 +562,71 @@ int __stdcall main(HINSTANCE hInstance,
 	QueryPerformanceFrequency(&QueryFreq);
 	LARGE_INTEGER LastProcBegin = {}, ProcBegin = {}, ProcEnd = {};
 	bool WasIdle = false;
-	char CurTitle[MAX_PATH + 100] = "\0", CurProcBuf[MAX_PATH] = "\0";
+	char CurTitle[511] = "\0", CurProcBuf[MAX_PATH] = "\0";
 	bool ActivityValid = false;
 
 	DWORD PrevLastInput = 0;
 	ui64 IdleTime = 0;
 	i32 ProcSymValue;
 
+	// TODO NOW: Set the hour to the last logged file hour
+	ui64 HourLast = 0;
+	ULARGE_INTEGER YearBegin2020;
+	{
+		FILETIME FileTime2020;
+		SYSTEMTIME SysTime2020 = {};
+		SysTime2020.wYear = 2020;
+		SysTime2020.wMonth = 1;
+		SysTime2020.wDay = 1;
+		SystemTimeToFileTime(&SysTime2020, &FileTime2020);
+		YearBegin2020.LowPart = FileTime2020.dwLowDateTime;
+		YearBegin2020.HighPart = FileTime2020.dwHighDateTime;
+	}
+
 	LARGE_INTEGER WholeProgramBegin = {}, WholeProgramEnd = {};
 	QueryPerformanceCounter(&WholeProgramBegin);
 
 	while(Running)
 	{
-		// TODO: Add code to detect whether a video is playing, and don't count watching videos as idle time.
-		// By not directly using LastInputInfo's time, only comparing to it, we prevent overflow problems for integers.
-		LASTINPUTINFO LastInputInfo = {sizeof(LASTINPUTINFO), 0};
-		assert(GetLastInputInfo(&LastInputInfo));
-		if(PrevLastInput != LastInputInfo.dwTime)
+		bool TimeChange = false;
+		SYSTEMTIME SysTimeNow;
+		FILETIME FileTimeNow;
+		GetSystemTime(&SysTimeNow);
+		SystemTimeToFileTime(&SysTimeNow, &FileTimeNow);
+		ui64 CurHour = ULARGE_INTEGER{FileTimeNow.dwLowDateTime, FileTimeNow.dwHighDateTime}.QuadPart / (3LL * 1000LL * 1000LL * 10LL);
+		// TODO NOW: Remove
+		if(!HourLast)
 		{
-			PrevLastInput = LastInputInfo.dwTime;
-			IdleTime = SleepMS;
+			HourLast = CurHour;
+		}
+
+		if(HourLast != CurHour)
+		{
+			Log(TE_Other, 0x0e, "Hour changed: Finishing and logging current activity.\n");
+
+			TimeChange = true;
+			HourLast = CurHour;
 		}
 		else
 		{
-			IdleTime += SleepMS;
+			/*
+				We do not want to check for idling if we are already switching hour, as that would cause 
+				two simulatenous activity changes if we became idle now (there can only be one change at a time). 
+			*/
+
+			// TODO: Add code to detect whether a video is playing, and don't count watching videos as idle time.
+			// By not directly using LastInputInfo's time, only comparing to it, we prevent overflow problems for integers.
+			LASTINPUTINFO LastInputInfo = {sizeof(LASTINPUTINFO), 0};
+			assert(GetLastInputInfo(&LastInputInfo));
+			if(PrevLastInput != LastInputInfo.dwTime)
+			{
+				PrevLastInput = LastInputInfo.dwTime;
+				IdleTime = SleepMS;
+			}
+			else
+			{
+				IdleTime += SleepMS;
+			}
 		}
 
 		bool IsIdle = (IdleTime >= InactivityThreshMS);
@@ -592,16 +635,19 @@ int __stdcall main(HINSTANCE hInstance,
 
 		// If the user isn't idle, check if the program changed
 		bool ProgramChange = false;
-		char NewTitle[MAX_PATH + 100];
+		char NewTitle[511];
 		ui32 NewTitleLen = 0;
 		HWND ActiveWin = {};
-		if(!IsIdle)
+		if(TimeChange)
+		{
+			strcpy_s(NewTitle, "Hour Switch");
+		}
+		else if(!IsIdle)
 		{
 			if(ActiveWin = GetForegroundWindow())
 			{
-				wchar_t NewTitleW[MAX_PATH];
+				wchar_t NewTitleW[255];
 				NewTitleLen = GetWindowText(ActiveWin, NewTitleW, ArrayLength(NewTitleW));
-				// TODO: Fix buffer overflows in WideCharToMultiByte (increasing CurTitle & NewTitle buffer size was a temp fix) and allow much larger title lengths (since Windows allows infinite length titles).
 
 				if(NewTitleLen)
 				{
@@ -624,10 +670,12 @@ int __stdcall main(HINSTANCE hInstance,
 		}
 
 		bool ActivityChange = ProgramChange || SwitchToIdle || SwitchFromIdle;
+		bool ProcedureChange = ActivityChange || TimeChange;
+		assert(ProcedureChange == (TimeChange != ActivityChange));
 
 		// If the active process is changing or the user is becoming idle, log the last active process.
 		// NOTE that these conditions are exclusive, and ARE ASSUMED AS SUCH in the following code.
-		if(ActivityChange)
+		if(ProcedureChange)
 		{
 			QueryPerformanceCounter(&ProcEnd);
 			LARGE_INTEGER NextProcBegin = ProcEnd;
@@ -636,12 +684,8 @@ int __stdcall main(HINSTANCE hInstance,
 				If the user is becoming idle, we need to 'reclaim' the time that we counted as program time and
 				instead add it to the idle time, since we couldn't know if the user was idle until the idling 
 				threshold was met.
-				TODO: Contrary to what the paragraph below says, program switching is not technically counted 
-					as non-idle (if a program is opened/made active in another way). Make *all* program switching
-					(i.e. non-human) count as non-idle?
-				We don't need to concern ourselves with whether the idling time goes over a previous program,
-				and thus we'd need to delete this whole programs entry, since the program switchting itself
-				means that the user isn't idle. So idling time can only affect the current program entry.
+				Note that the last time the user was idle can be _before_ a program switch. In that case the
+				logged time will be negative, which is handled further below.
 			*/
 			if(SwitchToIdle)
 			{
@@ -699,9 +743,19 @@ int __stdcall main(HINSTANCE hInstance,
 				Log(TE_Reaction, 0x04, "Adding invalid program time ('%s' for %fs) to next program ('%s').\n", CurTitle, fProcTime, NewTitle);
 			}
 
-			// A program whose title or process name we can't decipher is not valid
-			ActivityValid = IsIdle ||
-											(NewTitleLen && GetActiveProgramInfo(ActiveWin, CurProcBuf, ArrayLength(CurProcBuf)));
+			if(TimeChange)
+			{
+				ActivityValid = false;
+			}
+			else if(IsIdle)
+			{
+				ActivityValid = true;
+			}
+			else
+			{
+				// A program whose title or process name we can't decipher is not valid.
+				ActivityValid = NewTitleLen && GetActiveProgramInfo(ActiveWin, CurProcBuf, ArrayLength(CurProcBuf));
+			}
 
 			LastProcBegin = ProcBegin;
 			ProcBegin = NextProcBegin;
