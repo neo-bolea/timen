@@ -440,45 +440,6 @@ bool GetActiveProgramInfo(HWND ActiveWin, char *ProcBuf, ui32 ProcBufLen)
 	return false;
 }
 
-void GetActiveTab(HWND Wnd)
-{
-	CoInitialize(NULL);
-	while(true)
-	{
-		CComQIPtr<IUIAutomation> uia;
-		if(FAILED(uia.CoCreateInstance(CLSID_CUIAutomation)) || !uia)
-			return;
-
-		CComPtr<IUIAutomationElement> root;
-		if(FAILED(uia->ElementFromHandle(Wnd, &root)) || !root)
-			return;
-
-		CComPtr<IUIAutomationCondition> condition;
-
-		//URL's id is 0xC354, or use UIA_EditControlTypeId for 1st edit box
-		uia->CreatePropertyCondition(UIA_ControlTypePropertyId,
-																 CComVariant(0xC354), &condition);
-
-		//or use edit control's name instead
-		//uia->CreatePropertyCondition(UIA_NamePropertyId,
-		//      CComVariant(L"Address and search bar"), &condition);
-
-		CComPtr<IUIAutomationElement> edit;
-		if(FAILED(root->FindFirst(TreeScope_Descendants, condition, &edit)) || !edit)
-			return; //maybe we don't have the right tab, continue...
-
-		CComVariant url;
-		edit->GetCurrentPropertyValue(UIA_ValueValuePropertyId, &url);
-		MessageBox(0, url.bstrVal, 0, 0);
-	}
-	CoUninitialize();
-}
-
-// TODO: Remove this macro once time-precision debugging is finished.
-#ifdef DEBUG
-global f64 AccumTimeMS = 0.0f;
-#endif
-
 std::atomic_bool Running = true;
 DWORD WINAPI NotifIconThread(void *Args);
 
