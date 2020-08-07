@@ -1,4 +1,9 @@
 // TODO: Reimplement different EOLs, on a per file basis.
+/*
+	TODO: Investigate this (bug or expected bevavior?:
+		React:  Adding invalid program time ('Unknown' for 0.001550s) to next program ('Hourly Interrupt').
+		React:  Adding invalid program time ('Unknown' for 0.100530s) to next program ('P:\C++\timen\build\timen.exe').
+*/
 
 // Visual Studio doesn't know what macros are defined in the build file, so dummy macros are defined here (that aren't actually defined).
 #ifndef VS_DUMMY
@@ -50,6 +55,8 @@ typedef double f64;
 	(Expr);            \
 	0
 #endif
+#define UNDEFINED_CODE_PATH assert(false)
+
 #define ArrayLength(Array) (sizeof(Array) / sizeof(Array[0]))
 #define PrintError()                                \
 	{                                                 \
@@ -63,7 +70,8 @@ typedef double f64;
 #define MIN(A, B) (((A) < (B)) ? (A) : (B))
 
 #pragma region String Helpers
-void StrECpy(char *Dst, const char *Src, char EndChar)
+internal void
+StrECpy(char *Dst, const char *Src, char EndChar)
 {
 	while(*Src && *Src != EndChar)
 	{
@@ -71,7 +79,8 @@ void StrECpy(char *Dst, const char *Src, char EndChar)
 	}
 }
 
-ui32 StrCCount(const char *Str, char C)
+internal ui32
+StrCCount(const char *Str, char C)
 {
 	ui32 Count = 0;
 	while(*Str)
@@ -84,7 +93,8 @@ ui32 StrCCount(const char *Str, char C)
 	return Count;
 }
 
-char *StrEnd(char *Str)
+internal char *
+StrEnd(char *Str)
 {
 	while(*Str)
 	{
@@ -93,7 +103,8 @@ char *StrEnd(char *Str)
 	return Str;
 }
 
-char *StrStrRFind(char *Str, const char *SubStr, size_t StrLen = (size_t)-1, size_t SubStrLen = (size_t)-1)
+internal char *
+StrStrRFind(char *Str, const char *SubStr, size_t StrLen = (size_t)-1, size_t SubStrLen = (size_t)-1)
 {
 	StrLen = (StrLen == (size_t)-1) ? strlen(Str) : StrLen;
 	SubStrLen = (SubStrLen == (size_t)-1) ? strlen(SubStr) : SubStrLen;
@@ -107,7 +118,8 @@ char *StrStrRFind(char *Str, const char *SubStr, size_t StrLen = (size_t)-1, siz
 	return 0;
 }
 
-void WidenUTF(wchar_t *Dst, i32 DstLen, char *Src, i32 SrcLen = -1)
+internal void
+WidenUTF(wchar_t *Dst, i32 DstLen, char *Src, i32 SrcLen = -1)
 {
 	if(SrcLen == -1)
 	{
@@ -117,7 +129,8 @@ void WidenUTF(wchar_t *Dst, i32 DstLen, char *Src, i32 SrcLen = -1)
 	assert(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, Src, SrcLen, Dst, DstLen));
 }
 
-wchar_t *WidenUTFAlloc(char *Str, i32 StrLen = -1)
+internal wchar_t *
+WidenUTFAlloc(char *Str, i32 StrLen = -1)
 {
 	if(StrLen == -1)
 	{
@@ -130,7 +143,8 @@ wchar_t *WidenUTFAlloc(char *Str, i32 StrLen = -1)
 	return Res;
 }
 
-void NarrowUTF(char *Dst, i32 DstLen, wchar_t *Src, i32 SrcLen = -1)
+internal void
+NarrowUTF(char *Dst, i32 DstLen, wchar_t *Src, i32 SrcLen = -1)
 {
 	if(SrcLen == -1)
 	{
@@ -140,7 +154,8 @@ void NarrowUTF(char *Dst, i32 DstLen, wchar_t *Src, i32 SrcLen = -1)
 	assert(WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Src, SrcLen, Dst, DstLen, 0, 0));
 }
 
-char *NarrowUTFAlloc(wchar_t *Str, i32 StrLen = -1)
+internal char *
+NarrowUTFAlloc(wchar_t *Str, i32 StrLen = -1)
 {
 	if(StrLen == -1)
 	{
@@ -166,17 +181,26 @@ typedef enum eol_type
 } eol_type;
 
 global const eol_type EOLType = LF;
-global const char *EOLStr = "\n";
-global const ui32 EOLLen = 1;
+global const char *EOLStr = ",";
+global const ui32 EOLLen = (ui32)strlen(EOLStr);
 
-bool IsEOLChar(char C)
+internal bool
+IsEOLChar(char C)
 {
-	return C == '\n';
+	for(size_t i = 0; i < EOLLen; i++)
+	{
+		if(C == EOLStr[i])
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 // Compares strings until EOL or end of string
 // EOLStr is the string that contains the new line character, Str is assumed to have no new line
-bool StrCmpEOL(const char *MulLineStr, const char *Str)
+internal bool
+StrCmpEOL(const char *MulLineStr, const char *Str)
 {
 	while(*MulLineStr == *Str)
 	{
@@ -189,7 +213,8 @@ bool StrCmpEOL(const char *MulLineStr, const char *Str)
 	return false;
 }
 
-ui32 EOLCount(const char *Str)
+internal ui32
+EOLCount(const char *Str)
 {
 	ui32 Count = 0;
 	while(*Str)
@@ -199,26 +224,32 @@ ui32 EOLCount(const char *Str)
 	return Count;
 }
 
-char *AfterNextEOL(char *Str)
+internal char *
+AfterNextEOL(char *Str)
 {
 	do
 	{
-		if(*Str == '\n')
+		if(*Str == EOLStr[0])
 		{
-			return Str + 1;
+			return Str + EOLLen;
 		}
 	} while(*Str++);
 	return 0;
 }
 
-char *InsertEOL(char *Str)
+internal char *
+InsertEOL(char *Str)
 {
-	*Str++ = '\n';
+	for(size_t i = 0; i < EOLLen; i++)
+	{
+		*Str++ = EOLStr[i];
+	}
 	return Str;
 }
 #pragma endregion
 
 #pragma region Debug Logging
+// TODO: Remove event distinction?
 enum timen_event
 {
 	TE_Other = 0,
@@ -236,7 +267,8 @@ HANDLE DebugConsole;
 	Action -> Reaction -> Action -> Reaction -> ...
 	Depending on how the program evolves, this naive assertion might be deprecated.
 */
-void LogV(timen_event Event, ui8 Color, const char *Format, va_list Args)
+internal void
+LogV(timen_event Event, ui8 Color, const char *Format, va_list Args)
 {
 	printf((Event == TE_Reaction) ? "React:  " : (Event == TE_Reaction) ? "\nAction: " : "\n");
 	SetConsoleTextAttribute(DebugConsole, Color);
@@ -244,11 +276,12 @@ void LogV(timen_event Event, ui8 Color, const char *Format, va_list Args)
 	SetConsoleTextAttribute(DebugConsole, 0x07);
 
 	persist timen_event LastEvent = TE_Other;
-	assert(Event != LastEvent);
+	//assert(Event != LastEvent);
 	LastEvent = Event;
 }
 #else
-void LogV(timen_event Event, ui8 Color, const char *Format, va_list Args)
+internal void
+LogV(timen_event Event, ui8 Color, const char *Format, va_list Args)
 {
 	SetConsoleTextAttribute(DebugConsole, Color);
 	vprintf(Format, Args);
@@ -256,7 +289,8 @@ void LogV(timen_event Event, ui8 Color, const char *Format, va_list Args)
 }
 #endif
 
-void Log(timen_event Event, const char *Format...)
+internal void
+Log(timen_event Event, const char *Format...)
 {
 	va_list Args;
 	va_start(Args, Format);
@@ -264,7 +298,8 @@ void Log(timen_event Event, const char *Format...)
 	va_end(Args);
 }
 
-void Log(timen_event Event, ui8 Color, const char *Format...)
+internal void
+Log(timen_event Event, ui8 Color, const char *Format...)
 {
 	va_list Args;
 	va_start(Args, Format);
@@ -273,7 +308,8 @@ void Log(timen_event Event, ui8 Color, const char *Format...)
 }
 #pragma endregion
 
-ui32 GetFileSize32(HANDLE File)
+internal ui32
+GetFileSize32(HANDLE File)
 {
 	LARGE_INTEGER FileSize64;
 	assert(GetFileSizeEx(File, &FileSize64));
@@ -295,7 +331,8 @@ typedef struct proc_sym_table
 	ui32 GUID;
 } proc_sym_table;
 
-ui32 FindSymbolInFile(proc_sym_table *Syms, const char *Str)
+internal ui32
+FindSymbolInFile(proc_sym_table *Syms, const char *Str)
 {
 	assert(Syms->SymFile != INVALID_HANDLE_VALUE);
 	ui32 FileSize = GetFileSize32(Syms->SymFile);
@@ -331,7 +368,8 @@ ui32 FindSymbolInFile(proc_sym_table *Syms, const char *Str)
 }
 
 global const ui32 NEW_SYM_ID = UINT32_MAX;
-process_symbol AddSymToTable(proc_sym_table *Syms, const char *Str, ui64 Time, ui32 ID)
+internal process_symbol
+AddSymToTable(proc_sym_table *Syms, const char *Str, ui64 Time, ui32 ID)
 {
 	// Create the new symbol
 	process_symbol NewSym;
@@ -356,7 +394,8 @@ process_symbol AddSymToTable(proc_sym_table *Syms, const char *Str, ui64 Time, u
 	return NewSym;
 }
 
-ui32 ProcessProcSym(proc_sym_table *Syms, const char *Str)
+internal ui32
+ProcessProcSym(proc_sym_table *Syms, const char *Str)
 {
 	assert(*Str);
 
@@ -401,26 +440,112 @@ ui32 ProcessProcSym(proc_sym_table *Syms, const char *Str)
 	}
 }
 
-void LogProgram(HANDLE File, char *Title, i32 ProcSymbol, const char *Info, f64 fProcTime)
-{
-	ui64 TitleLen = strlen(Title);
-	assert(TitleLen);
-	// TODO: Fix this (this was a temp fix).
-	char LogBuffer[1024];
-	if(TitleLen > 1000)
-	{
-		Title[1000] = '\0';
-	}
-	sprintf_s(LogBuffer, "%s%s%i%s%s%s%f%s%s", Title, EOLStr, ProcSymbol, EOLStr, Info, EOLStr, fProcTime, EOLStr, EOLStr); // TODO: Log at sub-second precision?
-	Log(TE_Reaction, 0x02, "Logging '%s' for %fs\n", Title, fProcTime);
-	i32 LogLen = (i32)strlen(LogBuffer);
+// TODO: Remove these variables once time-precision debugging is finished.
+global LARGE_INTEGER WholeProgramBegin = {}, WholeProgramEnd = {};
+global f64 AccumTimeMS = 0.0f;
 
-	DWORD BytesWritten;
-	assert(SetFilePointer(File, 0, 0, FILE_END) != INVALID_SET_FILE_POINTER);
-	assert(WriteFile(File, LogBuffer, LogLen, &BytesWritten, 0) && (i32)BytesWritten == LogLen);
+// Describes the action that this program has taken in a loop pass
+enum activity_type
+{
+	AT_Invalid = -1,
+
+	AT_Unknown,
+	AT_Prog,
+	AT_Idle,
+};
+
+internal bool
+ActivityIsLoggable(activity_type Type)
+{
+	return Type == AT_Prog || Type == AT_Idle;
 }
 
-bool GetActiveProgramInfo(HWND ActiveWin, char *ProcBuf, ui32 ProcBufLen)
+internal char *
+GetActivityTitle(activity_type Type, char *Title)
+{
+	switch(Type)
+	{
+		case AT_Prog:
+			return Title;
+		case AT_Unknown:
+			return "Unknown";
+		case AT_Idle:
+			return "Idle";
+		default:
+			return "???";
+	}
+}
+
+internal void
+LogProgram(HANDLE File, proc_sym_table &Symbols,
+					 char *Title, char *NextTitle, char *ProcessName, const char *Info,
+					 activity_type ActivityType, activity_type NextActivityType,
+					 LARGE_INTEGER TimeBegin, LARGE_INTEGER TimeEnd, LARGE_INTEGER &NextTimeBegin, LARGE_INTEGER QueryFreq)
+{
+	// Note: The program time can be negative if the user became idle before the program started, so we need to check for that...
+	f64 fProcTime = ((f64)(TimeEnd.QuadPart - TimeBegin.QuadPart) / (f64)QueryFreq.QuadPart);
+	if(ActivityIsLoggable(ActivityType) && fProcTime > 0)
+	{
+		i32 ProcSymValue = -1;
+		if(ActivityType != AT_Idle)
+		{
+			// Convert process name to a symbol
+			char *ProcName = strrchr(ProcessName, '\\') + 1;
+			ProcSymValue = ProcessProcSym(&Symbols, ProcName);
+			assert((i32)FindSymbolInFile(&Symbols, ProcName) == ProcSymValue);
+		}
+
+		// TODO: Don't log title if it proves to be unnecessary (especially since titles use up a lot of memory...).
+		// TODO: Add extra info to certain windows (e.g. tab/site info for browsers).
+		{
+			ui64 TitleLen = strlen(Title);
+			assert(TitleLen);
+			// TODO: Fix this (this was a temp fix).
+			char LogBuffer[1024];
+			if(TitleLen > 1000)
+			{
+				Title[1000] = '\0';
+			}
+			sprintf_s(LogBuffer, "%s%s%i%s%s%s%f%s%s", Title, EOLStr, ProcSymValue, EOLStr, Info, EOLStr, fProcTime, EOLStr, EOLStr);
+			Log(TE_Reaction, 0x02, "Logging '%s' for %fs\n", Title, fProcTime);
+			i32 LogLen = (i32)strlen(LogBuffer);
+
+			DWORD BytesWritten;
+			assert(SetFilePointer(File, 0, 0, FILE_END) != INVALID_SET_FILE_POINTER);
+			assert(WriteFile(File, LogBuffer, LogLen, &BytesWritten, 0) && (i32)BytesWritten == LogLen);
+		}
+
+#ifdef DEBUG
+		// Assert that there are no time leaks (no 'lost' seconds) and that conservation of time is correct.
+		// Idle time is an exception, since we might later 'reclaim' time as idle, which would make the assertion temporarily a false positive.
+		AccumTimeMS += fProcTime;
+		if(NextActivityType != AT_Idle)
+		{
+			QueryPerformanceCounter(&WholeProgramEnd);
+			f64 TotalProgramTime = ((f64)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (f64)QueryFreq.QuadPart);
+			f64 TimeError = fabs(TotalProgramTime - AccumTimeMS);
+			if(TimeError >= 0.2f)
+			{
+				printf("TIME ERROR: %f (%f not %f)\n", TimeError, AccumTimeMS, TotalProgramTime);
+				UNDEFINED_CODE_PATH;
+			}
+			else
+			{
+				printf("Time Precision: %f (%f not %f)\n", TimeError, AccumTimeMS, TotalProgramTime);
+			}
+		}
+#endif
+	}
+	else if(fProcTime <= 0 || !ActivityIsLoggable(ActivityType))
+	{
+		// If the current activity is somehow invalid, add the time to the next activity.
+		NextTimeBegin.QuadPart -= (ui64)(fProcTime * QueryFreq.QuadPart);
+		Log(TE_Reaction, 0x04, "Adding invalid program time ('%s' for %fs) to next program ('%s').\n", Title, fProcTime, NextTitle);
+	}
+}
+
+internal bool
+GetActiveProgramInfo(HWND ActiveWin, char *ProcBuf, ui32 ProcBufLen)
 {
 	wchar_t ProcBufW[255];
 	DWORD ProcID;
@@ -462,6 +587,7 @@ int __stdcall main(HINSTANCE hInstance,
 
 	wchar_t *LogFilename = L"Log.txt";
 	wchar_t *SymFilename = L"Log.sym";
+	wchar_t *StampFilename = L"Log.stp";
 
 	proc_sym_table Symbols;
 	// By filling with zero we assure that unused symbol slots will be overwritten (since they will have a timestamp of 0, the oldest number)
@@ -471,18 +597,27 @@ int __stdcall main(HINSTANCE hInstance,
 	{
 #ifdef DEBUG
 		assert(DeleteFile(LogFilename));
-#else
-		assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_NORMAL));
 #endif
 	}
 	HANDLE LogFile = CreateFile(LogFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	assert(LogFile != INVALID_HANDLE_VALUE);
 
-	if(PathFileExists(SymFilename))
-	{
-		assert(SetFileAttributes(SymFilename, FILE_ATTRIBUTE_NORMAL));
-	}
+	/*
+		The symbol file stores all process names, since they are very repetitive and do not have to be written each time.
+	*/
 	Symbols.SymFile = CreateFile(SymFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+	assert(Symbols.SymFile != INVALID_HANDLE_VALUE);
+
+	/*
+		Time Divisions:
+		All activities are grouped into time divisions. If a time division is every hour, that means 
+		that all activities in that hour are grouped into that division. That way we can navigate
+		the file easily by looking up the time division.
+
+		The stamp file indicates what time division started at which activity (e.g. 4th hour of 8/2/20 started at activity X),
+		thus allowing us to navigate the file (and efficiently at that).
+	*/
+	HANDLE StampFile = CreateFile(StampFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	assert(Symbols.SymFile != INVALID_HANDLE_VALUE);
 
 	// Count the amount of symbols that are currently stored, to correctly set the GUID
@@ -503,8 +638,8 @@ int __stdcall main(HINSTANCE hInstance,
 	// TODO: Switch to second granularity once finished debugging.
 	// TODO: Also log seconds, not milliseconds.
 	const ui32 SleepMS = 100;
+	const ui32 TimeDivS = 3;
 	const ui32 InactivityThreshMS = 2000;
-	const ui32 MinProgTimeMS = 500;
 
 	// Windows Filetime is in 100 nanoseconds intervals
 	ui32 MSToFiletime = 10000;
@@ -516,22 +651,14 @@ int __stdcall main(HINSTANCE hInstance,
 
 	// Calculates the time remainder the timer should adhere to. See Sleep() below for further explanations.
 	ui64 TimePrecisionRem = SysTime.QuadPart % (Sleep100NS);
-	ui64 Iterations = 0;
-	ui64 TimeErrorCount = 0, IndivTimeErrorCount = 0;
+	ui64 Iterations = 0, TimeErrorCount = 0, IndivTimeErrorCount = 0;
 
 	LARGE_INTEGER QueryFreq;
 	QueryPerformanceFrequency(&QueryFreq);
-	LARGE_INTEGER LastProcBegin = {}, ProcBegin = {}, ProcEnd = {};
-	bool WasIdle = false;
-	char CurTitle[511] = "\0", CurProcBuf[MAX_PATH] = "\0";
-	bool ActivityValid = false;
-
-	DWORD PrevLastInput = 0;
-	ui64 IdleTime = 0;
-	i32 ProcSymValue;
+	LARGE_INTEGER ProcBegin = {}, ProcEnd = {};
+	char CurTitle[511] = "\0", ProcessName[MAX_PATH] = "\0";
 
 	// TODO NOW: Set the hour to the last logged file hour
-	ui64 HourLast = 0;
 	ULARGE_INTEGER YearBegin2020;
 	{
 		FILETIME FileTime2020;
@@ -544,37 +671,17 @@ int __stdcall main(HINSTANCE hInstance,
 		YearBegin2020.HighPart = FileTime2020.dwHighDateTime;
 	}
 
-	LARGE_INTEGER WholeProgramBegin = {}, WholeProgramEnd = {};
-	QueryPerformanceCounter(&WholeProgramBegin);
+	QueryPerformanceCounter(&ProcBegin);
+	WholeProgramBegin = ProcBegin;
 
 	while(Running)
 	{
-		bool TimeChange = false;
-		SYSTEMTIME SysTimeNow;
-		FILETIME FileTimeNow;
-		GetSystemTime(&SysTimeNow);
-		SystemTimeToFileTime(&SysTimeNow, &FileTimeNow);
-		ui64 CurHour = ULARGE_INTEGER{FileTimeNow.dwLowDateTime, FileTimeNow.dwHighDateTime}.QuadPart / (3LL * 1000LL * 1000LL * 10LL);
-		// TODO NOW: Remove
-		if(!HourLast)
-		{
-			HourLast = CurHour;
-		}
+		persist activity_type ActivityType = AT_Invalid;
+		activity_type NextActivityType = AT_Invalid;
 
-		if(HourLast != CurHour)
+		persist ui64 IdleTime = 0;
 		{
-			Log(TE_Other, 0x0e, "Hour changed: Finishing and logging current activity.\n");
-
-			TimeChange = true;
-			HourLast = CurHour;
-		}
-		else
-		{
-			/*
-				We do not want to check for idling if we are already switching hour, as that would cause 
-				two simulatenous activity changes if we became idle now (there can only be one change at a time). 
-			*/
-
+			persist DWORD PrevLastInput = 0;
 			// TODO: Add code to detect whether a video is playing, and don't count watching videos as idle time.
 			// By not directly using LastInputInfo's time, only comparing to it, we prevent overflow problems for integers.
 			LASTINPUTINFO LastInputInfo = {sizeof(LASTINPUTINFO), 0};
@@ -582,61 +689,36 @@ int __stdcall main(HINSTANCE hInstance,
 			if(PrevLastInput != LastInputInfo.dwTime)
 			{
 				PrevLastInput = LastInputInfo.dwTime;
-				IdleTime = SleepMS;
+				IdleTime = 0;
 			}
-			else
+			IdleTime += SleepMS;
+
+			if(IdleTime >= InactivityThreshMS)
 			{
-				IdleTime += SleepMS;
+				NextActivityType = AT_Idle;
 			}
 		}
 
-		bool IsIdle = (IdleTime >= InactivityThreshMS);
-		bool SwitchToIdle = (!WasIdle && IsIdle);
-		bool SwitchFromIdle = (WasIdle && !IsIdle);
-
+		char NextTitle[511];
 		// If the user isn't idle, check if the program changed
-		bool ProgramChange = false;
-		char NewTitle[511];
-		ui32 NewTitleLen = 0;
-		HWND ActiveWin = {};
-		if(TimeChange)
+		if(NextActivityType != AT_Idle)
 		{
-			strcpy_s(NewTitle, "Hour Switch");
-		}
-		else if(!IsIdle)
-		{
-			if(ActiveWin = GetForegroundWindow())
+			NextActivityType = AT_Unknown;
+			HWND ActiveWin = GetForegroundWindow();
+			if(ActiveWin)
 			{
 				wchar_t NewTitleW[255];
-				NewTitleLen = GetWindowText(ActiveWin, NewTitleW, ArrayLength(NewTitleW));
+				ui32 NewTitleLen = GetWindowText(ActiveWin, NewTitleW, ArrayLength(NewTitleW));
 
-				if(NewTitleLen)
+				if(NewTitleLen && GetActiveProgramInfo(ActiveWin, ProcessName, ArrayLength(ProcessName)))
 				{
-					NarrowUTF(NewTitle, ArrayLength(NewTitle), NewTitleW);
-				}
-				else
-				{
-					strcpy_s(NewTitle, "Unknown");
-				}
-
-				if(strcmp(CurTitle, NewTitle) != 0)
-				{
-					ProgramChange = true;
+					NarrowUTF(NextTitle, ArrayLength(NextTitle), NewTitleW);
+					NextActivityType = AT_Prog;
 				}
 			}
 		}
-		else if(SwitchToIdle)
-		{
-			strcpy_s(NewTitle, "Idle");
-		}
 
-		bool ActivityChange = ProgramChange || SwitchToIdle || SwitchFromIdle;
-		bool ProcedureChange = ActivityChange || TimeChange;
-		assert(ProcedureChange == (TimeChange != ActivityChange));
-
-		// If the active process is changing or the user is becoming idle, log the last active process.
-		// NOTE that these conditions are exclusive, and ARE ASSUMED AS SUCH in the following code.
-		if(ProcedureChange)
+		if((ActivityType != NextActivityType) || (strcmp(CurTitle, NextTitle) != 0))
 		{
 			QueryPerformanceCounter(&ProcEnd);
 			LARGE_INTEGER NextProcBegin = ProcEnd;
@@ -648,124 +730,110 @@ int __stdcall main(HINSTANCE hInstance,
 				Note that the last time the user was idle can be _before_ a program switch. In that case the
 				logged time will be negative, which is handled further below.
 			*/
-			if(SwitchToIdle)
+			if(NextActivityType == AT_Idle)
 			{
 				ui64 AddedIdleTime = IdleTime * QueryFreq.QuadPart / 1000;
 				ProcEnd.QuadPart -= AddedIdleTime;
 				NextProcBegin.QuadPart -= AddedIdleTime;
 			}
 
-			// TODO: Use integer time
-			// Note: The program time can be negative if the user became idle before the program started, so we need to check for that...
-			f64 fProcTime = ((f64)(ProcEnd.QuadPart - ProcBegin.QuadPart) / (f64)QueryFreq.QuadPart);
-			if(ActivityValid && fProcTime > 0)
-			{
-				if(SwitchFromIdle)
-				{
-					ProcSymValue = -1;
-				}
-				else
-				{
-					// Convert process name to a symbol
-					char *ProcName = strrchr(CurProcBuf, '\\') + 1;
-					ProcSymValue = ProcessProcSym(&Symbols, ProcName);
-					i32 FileValue = FindSymbolInFile(&Symbols, ProcName);
-					assert(FileValue == ProcSymValue);
-				}
+			char *CurLogName = GetActivityTitle(ActivityType, CurTitle);
+			char *NextLogName = GetActivityTitle(NextActivityType, NextTitle);
+			LogProgram(LogFile, Symbols,
+								 CurLogName, NextLogName, ProcessName, "-",
+								 ActivityType, NextActivityType,
+								 ProcBegin, ProcEnd, NextProcBegin, QueryFreq);
 
-				// TODO: Don't log title if it proves to be unnecessary (especially since titles use up a lot of memory...).
-				// TODO: Add extra info to certain windows (e.g. tab/site info for browsers).
-				// Log the result
-				LogProgram(LogFile, CurTitle, ProcSymValue, "-", fProcTime);
-
-#ifdef DEBUG
-				// Assert that there are no time leaks (no 'lost' seconds) and that conservation of time is correct
-				AccumTimeMS += fProcTime;
-				if(!SwitchToIdle)
-				{
-					QueryPerformanceCounter(&WholeProgramEnd);
-					f64 TotalProgramTime = ((f64)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (f64)QueryFreq.QuadPart);
-					f64 TimeError = fabs(TotalProgramTime - AccumTimeMS);
-					if(TimeError >= 0.2f)
-					{
-						printf("TIME ERROR: %f (%f not %f)\n", TimeError, AccumTimeMS, TotalProgramTime);
-						assert(false);
-					}
-					else
-					{
-						printf("Time Precision: %f (%f not %f)\n", TimeError, AccumTimeMS, TotalProgramTime);
-					}
-				}
-#endif
-			}
-			else if(*CurTitle && (fProcTime <= 0 || !ActivityValid))
-			{
-				NextProcBegin.QuadPart -= (ui64)(fProcTime * QueryFreq.QuadPart);
-				Log(TE_Reaction, 0x04, "Adding invalid program time ('%s' for %fs) to next program ('%s').\n", CurTitle, fProcTime, NewTitle);
-			}
-
-			if(TimeChange)
-			{
-				ActivityValid = false;
-			}
-			else if(IsIdle)
-			{
-				ActivityValid = true;
-			}
-			else
-			{
-				// A program whose title or process name we can't decipher is not valid.
-				ActivityValid = NewTitleLen && GetActiveProgramInfo(ActiveWin, CurProcBuf, ArrayLength(CurProcBuf));
-			}
-
-			LastProcBegin = ProcBegin;
 			ProcBegin = NextProcBegin;
 
-			Log(TE_Action, "Switching from '%s' to '%s'\n", CurTitle, NewTitle);
-			strcpy_s(CurTitle, NewTitle);
+			Log(TE_Action, "Switching from '%s' to '%s'\n", CurLogName, NextLogName);
+			strcpy_s(CurTitle, NextTitle);
 		}
 
-		WasIdle = IsIdle;
+		ActivityType = NextActivityType;
 
 		if(Running)
 		{
-			// TODO: Once file checkpoints have been implemented, explain why perfect long-time precision is important.
-			/*
-				Sleep() doesn't guarantee perfect time precision, and these imprecisions can stack up to very
-				high numbers over time. Here we try to manually correct these imprecisions.
-				Example: If the sleep interval is one second, we try to keep the intervals at exactly one second.
-					We do that by trying to keep the remainder of the second right (i.e. here in milliseconds):
-					If the milliseconds for the first iteration is .517s, we try to continue that pattern:
-					1.517s, 2.517s, etc. If the remainder is .520s, we sleep 3ms less.
-			*/
-			FILETIME TimeNowFile;
-			GetSystemTimeAsFileTime(&TimeNowFile);
-			ULARGE_INTEGER TimeNow{TimeNowFile.dwLowDateTime, TimeNowFile.dwHighDateTime};
-
-			ui64 TimeRem = TimeNow.QuadPart % (Sleep100NS);
-			assert(TimeRem < INT64_MAX);
-			i32 TimeCorrection = (i32)(((i64)TimeRem - (i64)TimePrecisionRem) / MSToFiletime);
-			i64 TotalTimeError = (i64)(TimeNow.QuadPart / MSToFiletime) - ((i64)(SysTime.QuadPart + Iterations++ * SleepMS * MSToFiletime) / MSToFiletime);
-
-			SYSTEMTIME ProfTime;
-			FileTimeToSystemTime(&TimeNowFile, &ProfTime);
-			//printf("Time: %i:%i.%i, to recover: %ims, error: %ims\n", ProfTime.wMinute, ProfTime.wSecond, ProfTime.wMilliseconds, TimeCorrection, (i32)TotalTimeError);
-
-			persist bool LastWasError = false;
-			if(TotalTimeError < SleepMS)
+			// TODO: Is it defined behaviour to log two program in one loop pass?
+			// Check if the time division switched
 			{
-				Sleep(SleepMS - TimeCorrection);
-				LastWasError = false;
-			}
-			else
-			{
-				if(!LastWasError)
+				SYSTEMTIME SysTimeNow;
+				FILETIME FileTimeNow;
+				GetSystemTime(&SysTimeNow);
+				SystemTimeToFileTime(&SysTimeNow, &FileTimeNow);
+				ui64 CurTimeDiv = ULARGE_INTEGER{FileTimeNow.dwLowDateTime, FileTimeNow.dwHighDateTime}.QuadPart / (TimeDivS * 1000LL * 1000LL * 10LL);
+
+				persist ui64 TimeDivLast = CurTimeDiv;
+				/*
+					Since we want to know at what activity a time division started, it's easiest if an activity
+					starts exactly at that the time division switch. That's why, if an activity goes over from
+					one time division to another, we split that activity in two: before and after the division.
+				*/
+				if(TimeDivLast != CurTimeDiv)
 				{
-					IndivTimeErrorCount++;
-				}
+					TimeDivLast = CurTimeDiv;
+					Log(TE_Other, 0x0e, "Time division changed: Finishing and logging current activity.\n");
 
-				TimeErrorCount++;
-				LastWasError = true;
+					QueryPerformanceCounter(&ProcEnd);
+					LARGE_INTEGER NextProcBegin = ProcEnd;
+					char *CurLogName = GetActivityTitle(ActivityType, CurTitle);
+					LogProgram(LogFile, Symbols,
+										 CurLogName, "Time Division Interrupt", ProcessName, "-",
+										 ActivityType, NextActivityType,
+										 ProcBegin, ProcEnd, NextProcBegin, QueryFreq);
+					ProcBegin = NextProcBegin;
+
+					// Write a stamp to indicate the activity with which the next time division is starting.
+					char TimeDivBuf[255];
+					LARGE_INTEGER LastActivityEnd;
+					assert(GetFileSizeEx(LogFile, &LastActivityEnd));
+					ui32 TimeDivLen = sprintf_s(TimeDivBuf, "%llu %llu%s", CurTimeDiv, LastActivityEnd.QuadPart, EOLStr);
+					DWORD BytesWritten;
+					assert(WriteFile(StampFile, TimeDivBuf, TimeDivLen, &BytesWritten, 0) && BytesWritten == TimeDivLen);
+				}
+			}
+
+			// Check for timing errors
+			{
+				/*
+					Sleep() doesn't guarantee perfect time precision, and these imprecisions can stack up to very
+					high numbers over time. Here we try to manually correct these imprecisions.
+					Example: If the sleep interval is one second long, we try to keep the intervals at exactly one second.
+						We do that by trying to keep the remainder of the second right (i.e. milliseconds here):
+						If the milliseconds for the first iteration are  .517s, we try to continue that pattern:
+						1.517s, 2.517s, etc. If the remainder is .520s, we sleep 3ms less.
+					This makes the logging more predictable, especially because an hour of activities might be logged as longer
+					than an hour, which could be erroneous with the time division navigation.
+				*/
+				FILETIME TimeNowFile;
+				GetSystemTimeAsFileTime(&TimeNowFile);
+				ULARGE_INTEGER TimeNow{TimeNowFile.dwLowDateTime, TimeNowFile.dwHighDateTime};
+
+				ui64 TimeRem = TimeNow.QuadPart % (Sleep100NS);
+				assert(TimeRem < INT64_MAX);
+				i32 TimeCorrection = (i32)(((i64)TimeRem - (i64)TimePrecisionRem) / MSToFiletime);
+				i64 TotalTimeError = (i64)(TimeNow.QuadPart / MSToFiletime) - ((i64)(SysTime.QuadPart + Iterations++ * SleepMS * MSToFiletime) / MSToFiletime);
+
+				SYSTEMTIME ProfTime;
+				FileTimeToSystemTime(&TimeNowFile, &ProfTime);
+				//printf("Time: %i:%i.%i, to recover: %ims, error: %ims\n", ProfTime.wMinute, ProfTime.wSecond, ProfTime.wMilliseconds, TimeCorrection, (i32)TotalTimeError);
+
+				persist bool LastWasError = false;
+				if(TotalTimeError < SleepMS)
+				{
+					Sleep(SleepMS - TimeCorrection);
+					LastWasError = false;
+				}
+				else
+				{
+					if(!LastWasError)
+					{
+						IndivTimeErrorCount++;
+					}
+
+					TimeErrorCount++;
+					LastWasError = true;
+				}
 			}
 		}
 	}
@@ -779,11 +847,6 @@ int __stdcall main(HINSTANCE hInstance,
 
 	CloseHandle(LogFile);
 	CloseHandle(Symbols.SymFile);
-
-#ifndef DEBUG
-	assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_READONLY));
-	assert(SetFileAttributes(SymFilename, FILE_ATTRIBUTE_READONLY));
-#endif
 
 	return 0;
 }
