@@ -1,20 +1,15 @@
-// TODO: Reimplement different EOLs, on a per file basis.
+// TODO: Test program on integrated GPU
 /*
 	TODO: Investigate this (bug or expected bevavior?:
 		React:  Adding invalid program time ('Unknown' for 0.001550s) to next program ('Hourly Interrupt').
 		React:  Adding invalid program time ('Unknown' for 0.100530s) to next program ('P:\C++\timen\build\timen.exe').
 */
 
-// Visual Studio doesn't know what macros are defined in the build file, so dummy macros are defined here (that aren't actually defined).
-#ifndef VS_DUMMY
-#define DEBUG
-#define UNICODE
-#endif
-
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <Psapi.h>
 #include <shellapi.h>
+#include <shellscalingapi.h>
 #include <Shlwapi.h>
 #include <UIAutomation.h>
 #include <AtlBase.h>
@@ -23,8 +18,11 @@
 #include <atomic>
 #include <stdio.h>
 #include <stdbool.h>
-#include <stdint.h>
 #include <stdlib.h>
+
+#include <stdint.h>
+
+typedef unsigned int uint;
 
 typedef int8_t i8;
 typedef int16_t i16;
@@ -35,6 +33,7 @@ typedef uint8_t ui8;
 typedef uint16_t ui16;
 typedef uint32_t ui32;
 typedef uint64_t ui64;
+typedef uint32_t uint;
 
 typedef float f32;
 typedef double f64;
@@ -43,279 +42,33 @@ typedef double f64;
 #define global static
 #define persist static
 
+// Used for text highlighting, since VS doesn't detect #defines specified in the build file.
+#ifndef VS_DUMMY
+#define DEBUG
+#define UNICODE
+#endif
+
 #ifdef DEBUG
-#define assert(Expr) \
-	if(!(Expr))        \
+#define assert(expr) \
+	if(!(expr))        \
 	{                  \
 		throw 0;         \
 	}                  \
 	0
 #else
-#define assert(Expr) \
-	(Expr);            \
-	0
+#define assert(Expression) (Expression)
 #endif
 #define UNDEFINED_CODE_PATH assert(false)
+// Like UNDEFINED_CODE_PATH, but indicates that the affected code path needs to be worked on to handle the exception properly.
+#define UNHANDLED_CODE_PATH assert(false)
 
-#define ArrayLength(Array) (sizeof(Array) / sizeof(Array[0]))
-#define PrintError()                                \
-	{                                                 \
-		char Error[255];                                \
-		wsprintf(Error, "ERROR: %i\n", GetLastError()); \
-		OutputDebugString(Error);                       \
-	}                                                 \
-	0
+#define ArrLen(arr) (sizeof((arr)) / sizeof((arr)[0]))
 
-#define MAX(A, B) (((A) < (B)) ? (B) : (A))
-#define MIN(A, B) (((A) < (B)) ? (A) : (B))
+#define MIN(A, B) ((A) <= (B) ? (A) : (B))
+#define MAX(A, B) ((A) > (B) ? (A) : (B))
 
-#pragma region String Helpers
-internal void
-StrECpy(char *Dst, const char *Src, char EndChar)
-{
-	while(*Src && *Src != EndChar)
-	{
-		*Dst++ = *Src++;
-	}
-}
-
-internal ui32
-StrCCount(const char *Str, char C)
-{
-	ui32 Count = 0;
-	while(*Str)
-	{
-		if(*Str++ == C)
-		{
-			Count++;
-		}
-	}
-	return Count;
-}
-
-internal char *
-StrEnd(char *Str)
-{
-	while(*Str)
-	{
-		Str++;
-	}
-	return Str;
-}
-
-internal char *
-StrStrRFind(char *Str, const char *SubStr, size_t StrLen = (size_t)-1, size_t SubStrLen = (size_t)-1)
-{
-	StrLen = (StrLen == (size_t)-1) ? strlen(Str) : StrLen;
-	SubStrLen = (SubStrLen == (size_t)-1) ? strlen(SubStr) : SubStrLen;
-	for(char *C = Str + StrLen - SubStrLen; C >= Str; C--)
-	{
-		if(strncmp(C, SubStr, SubStrLen) == 0)
-		{
-			return C;
-		}
-	}
-	return 0;
-}
-
-internal void
-WidenUTF(wchar_t *Dst, i32 DstLen, char *Src, i32 SrcLen = -1)
-{
-	if(SrcLen == -1)
-	{
-		SrcLen = (i32)strlen(Src);
-	}
-	SrcLen++;
-	assert(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, Src, SrcLen, Dst, DstLen));
-}
-
-internal wchar_t *
-WidenUTFAlloc(char *Str, i32 StrLen = -1)
-{
-	if(StrLen == -1)
-	{
-		StrLen = (i32)strlen(Str);
-	}
-	StrLen++;
-	i32 ReqSize = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, Str, StrLen, 0, 0);
-	wchar_t *Res = (wchar_t *)malloc(ReqSize);
-	WidenUTF(Res, ReqSize, Str, StrLen);
-	return Res;
-}
-
-internal void
-NarrowUTF(char *Dst, i32 DstLen, wchar_t *Src, i32 SrcLen = -1)
-{
-	if(SrcLen == -1)
-	{
-		SrcLen = (i32)wcslen(Src);
-	}
-	SrcLen++;
-	assert(WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Src, SrcLen, Dst, DstLen, 0, 0));
-}
-
-internal char *
-NarrowUTFAlloc(wchar_t *Str, i32 StrLen = -1)
-{
-	if(StrLen == -1)
-	{
-		StrLen = (i32)wcslen(Str);
-	}
-	StrLen++;
-	i32 ReqSize = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Str, StrLen, 0, 0, 0, 0);
-	char *Res = (char *)malloc(ReqSize);
-	NarrowUTF(Res, ReqSize, Str, StrLen);
-	return Res;
-}
-
-#define FreeUTF(Ptr) free((Ptr));
-#pragma endregion
-
-#pragma region EOL
-typedef enum eol_type
-{
-	LF,
-	CRLF,
-	CR,
-	EOL_UNDEFINED
-} eol_type;
-
-global const eol_type EOLType = LF;
-global const char *EOLStr = ",";
-global const ui32 EOLLen = (ui32)strlen(EOLStr);
-
-internal bool
-IsEOLChar(char C)
-{
-	for(size_t i = 0; i < EOLLen; i++)
-	{
-		if(C == EOLStr[i])
-		{
-			return true;
-		}
-	}
-	return false;
-}
-
-// Compares strings until EOL or end of string
-// EOLStr is the string that contains the new line character, Str is assumed to have no new line
-internal bool
-StrCmpEOL(const char *MulLineStr, const char *Str)
-{
-	while(*MulLineStr == *Str)
-	{
-		MulLineStr++, Str++;
-		if(!*MulLineStr || IsEOLChar(*MulLineStr))
-		{
-			return true;
-		}
-	}
-	return false;
-}
-
-internal ui32
-EOLCount(const char *Str)
-{
-	ui32 Count = 0;
-	while(*Str)
-	{
-		Count += IsEOLChar(*Str++);
-	}
-	return Count;
-}
-
-internal char *
-AfterNextEOL(char *Str)
-{
-	do
-	{
-		if(*Str == EOLStr[0])
-		{
-			return Str + EOLLen;
-		}
-	} while(*Str++);
-	return 0;
-}
-
-internal char *
-InsertEOL(char *Str)
-{
-	for(size_t i = 0; i < EOLLen; i++)
-	{
-		*Str++ = EOLStr[i];
-	}
-	return Str;
-}
-#pragma endregion
-
-#pragma region Debug Logging
-// TODO: Remove event distinction?
-enum timen_event
-{
-	TE_Other = 0,
-	TE_Reaction, // Synonymous to logging an activity switch
-	TE_Action // Synonymous to switching a program or transitioning into/from idle
-};
-timen_event LastTimenEvent = TE_Other;
-
-HANDLE DebugConsole;
-#ifdef DEBUG
-/*
-	While this functions acts as a logging function, it's second use is for asserting
-	that a given reaction event is always paired with a preceeding action event.
-	That means that the program is asserted to run like this:
-	Action -> Reaction -> Action -> Reaction -> ...
-	Depending on how the program evolves, this naive assertion might be deprecated.
-*/
-internal void
-LogV(timen_event Event, ui8 Color, const char *Format, va_list Args)
-{
-	printf((Event == TE_Reaction) ? "React:  " : (Event == TE_Reaction) ? "\nAction: " : "\n");
-	SetConsoleTextAttribute(DebugConsole, Color);
-	vprintf(Format, Args);
-	SetConsoleTextAttribute(DebugConsole, 0x07);
-
-	persist timen_event LastEvent = TE_Other;
-	//assert(Event != LastEvent);
-	LastEvent = Event;
-}
-#else
-internal void
-LogV(timen_event Event, ui8 Color, const char *Format, va_list Args)
-{
-	SetConsoleTextAttribute(DebugConsole, Color);
-	vprintf(Format, Args);
-	SetConsoleTextAttribute(DebugConsole, LC_Default);
-}
-#endif
-
-internal void
-Log(timen_event Event, const char *Format...)
-{
-	va_list Args;
-	va_start(Args, Format);
-	LogV(Event, 0x07, Format, Args);
-	va_end(Args);
-}
-
-internal void
-Log(timen_event Event, ui8 Color, const char *Format...)
-{
-	va_list Args;
-	va_start(Args, Format);
-	LogV(Event, Color, Format, Args);
-	va_end(Args);
-}
-#pragma endregion
-
-internal ui32
-GetFileSize32(HANDLE File)
-{
-	LARGE_INTEGER FileSize64;
-	assert(GetFileSizeEx(File, &FileSize64));
-	assert(FileSize64.QuadPart < UINT32_MAX);
-	return (ui32)FileSize64.QuadPart;
-}
+#include "cc_char.cpp"
+#include "cc_io.cpp"
 
 typedef struct process_symbol
 {
@@ -373,14 +126,14 @@ AddSymToTable(proc_sym_table *Syms, const char *Str, ui64 Time, ui32 ID)
 {
 	// Create the new symbol
 	process_symbol NewSym;
-	strcpy_s(NewSym.Str, ArrayLength(NewSym.Str), Str);
+	strcpy_s(NewSym.Str, ArrLen(NewSym.Str), Str);
 	NewSym.ID = (ID == NEW_SYM_ID) ? Syms->GUID++ : ID;
 	NewSym.LastActive = Time;
 
 	// Find the oldest symbol, which we will overwrite
 	ui64 OldestTime = UINT64_MAX;
 	ui32 OldestIndex = 0;
-	for(ui32 i = 0; i < ArrayLength(Syms->Symbols); i++)
+	for(ui32 i = 0; i < ArrLen(Syms->Symbols); i++)
 	{
 		ui64 CurTime = Syms->Symbols[i].LastActive;
 		if(CurTime < OldestTime)
@@ -405,7 +158,7 @@ ProcessProcSym(proc_sym_table *Syms, const char *Str)
 	assert(SystemTimeToFileTime(&SysTime, &FileTime));
 	ui64 Time = (ui64)FileTime.dwLowDateTime | ((ui64)FileTime.dwHighDateTime << 32);
 
-	for(ui32 i = 0; i < ArrayLength(Syms->Symbols); i++)
+	for(ui32 i = 0; i < ArrLen(Syms->Symbols); i++)
 	{
 		if(strcmp(Syms->Symbols[i].Str, Str) == 0)
 		{
@@ -507,7 +260,7 @@ LogProgram(HANDLE File, proc_sym_table &Symbols,
 				Title[1000] = '\0';
 			}
 			sprintf_s(LogBuffer, "%s%s%i%s%s%s%f%s%s", Title, EOLStr, ProcSymValue, EOLStr, Info, EOLStr, fProcTime, EOLStr, EOLStr);
-			Log(TE_Reaction, 0x02, "Logging '%s' for %fs\n", Title, fProcTime);
+			Log(0x02, "Logging '%s' for %fs\n", Title, fProcTime);
 			i32 LogLen = (i32)strlen(LogBuffer);
 
 			DWORD BytesWritten;
@@ -540,7 +293,7 @@ LogProgram(HANDLE File, proc_sym_table &Symbols,
 	{
 		// If the current activity is somehow invalid, add the time to the next activity.
 		NextTimeBegin.QuadPart -= (ui64)(fProcTime * QueryFreq.QuadPart);
-		Log(TE_Reaction, 0x04, "Adding invalid program time ('%s' for %fs) to next program ('%s').\n", Title, fProcTime, NextTitle);
+		Log(0x04, "Adding invalid program time ('%s' for %fs) to next program ('%s').\n", Title, fProcTime, NextTitle);
 	}
 }
 
@@ -555,7 +308,7 @@ GetActiveProgramInfo(HWND ActiveWin, char *ProcBuf, ui32 ProcBufLen)
 		HANDLE FGProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, ProcID);
 		if(FGProc != INVALID_HANDLE_VALUE)
 		{
-			if(GetProcessImageFileName(FGProc, ProcBufW, ArrayLength(ProcBufW)))
+			if(GetProcessImageFileName(FGProc, ProcBufW, ArrLen(ProcBufW)))
 			{
 				NarrowUTF(ProcBuf, ProcBufLen, ProcBufW);
 				return true;
@@ -597,6 +350,8 @@ int __stdcall main(HINSTANCE hInstance,
 	{
 #ifdef DEBUG
 		assert(DeleteFile(LogFilename));
+#else
+		assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_NORMAL));
 #endif
 	}
 	HANDLE LogFile = CreateFile(LogFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
@@ -605,6 +360,10 @@ int __stdcall main(HINSTANCE hInstance,
 	/*
 		The symbol file stores all process names, since they are very repetitive and do not have to be written each time.
 	*/
+	if(PathFileExists(SymFilename))
+	{
+		assert(SetFileAttributes(SymFilename, FILE_ATTRIBUTE_NORMAL));
+	}
 	Symbols.SymFile = CreateFile(SymFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	assert(Symbols.SymFile != INVALID_HANDLE_VALUE);
 
@@ -708,11 +467,11 @@ int __stdcall main(HINSTANCE hInstance,
 			if(ActiveWin)
 			{
 				wchar_t NewTitleW[255];
-				ui32 NewTitleLen = GetWindowText(ActiveWin, NewTitleW, ArrayLength(NewTitleW));
+				ui32 NewTitleLen = GetWindowText(ActiveWin, NewTitleW, ArrLen(NewTitleW));
 
-				if(NewTitleLen && GetActiveProgramInfo(ActiveWin, ProcessName, ArrayLength(ProcessName)))
+				if(NewTitleLen && GetActiveProgramInfo(ActiveWin, ProcessName, ArrLen(ProcessName)))
 				{
-					NarrowUTF(NextTitle, ArrayLength(NextTitle), NewTitleW);
+					NarrowUTF(NextTitle, ArrLen(NextTitle), NewTitleW);
 					NextActivityType = AT_Prog;
 				}
 			}
@@ -746,7 +505,7 @@ int __stdcall main(HINSTANCE hInstance,
 
 			ProcBegin = NextProcBegin;
 
-			Log(TE_Action, "Switching from '%s' to '%s'\n", CurLogName, NextLogName);
+			Log("Switching from '%s' to '%s'\n", CurLogName, NextLogName);
 			strcpy_s(CurTitle, NextTitle);
 		}
 
@@ -772,7 +531,7 @@ int __stdcall main(HINSTANCE hInstance,
 				if(TimeDivLast != CurTimeDiv)
 				{
 					TimeDivLast = CurTimeDiv;
-					Log(TE_Other, 0x0e, "Time division changed: Finishing and logging current activity.\n");
+					Log(0x0e, "Time division changed: Finishing and logging current activity.\n");
 
 					QueryPerformanceCounter(&ProcEnd);
 					LARGE_INTEGER NextProcBegin = ProcEnd;
@@ -845,6 +604,11 @@ int __stdcall main(HINSTANCE hInstance,
 
 	assert(WaitForSingleObject(ThreadHnd, 1000) != WAIT_TIMEOUT);
 
+#ifndef DEBUG
+	assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_READONLY));
+	assert(SetFileAttributes(SymFilename, FILE_ATTRIBUTE_READONLY));
+#endif
+
 	CloseHandle(LogFile);
 	CloseHandle(Symbols.SymFile);
 
@@ -853,11 +617,35 @@ int __stdcall main(HINSTANCE hInstance,
 
 typedef struct win_data
 {
+	HWND TimeMainGraph;
 	NOTIFYICONDATA *NotifIcon;
+	COLORREF BGColor;
 } win_data;
+
+typedef struct v2
+{
+	f32 x, y;
+} v2;
+
+void ResizeTimeGraph(HWND Wnd, UINT Msg, WPARAM W, LPARAM L);
+
+void UpdateWindowSize(win_data &WD, HWND Wnd, WPARAM W, LPARAM L)
+{
+	if(WD.TimeMainGraph)
+	{
+		int PosX = 50, PosY = 50;
+		int Width = (LOWORD(L) - PosX) / 2, Height = (HIWORD(L) - PosY) / 2;
+
+		if(Width > 0 && Height > 0)
+		{
+			SetWindowPos(WD.TimeMainGraph, 0, 0, 0, Width, Height, SWP_NOMOVE);
+		}
+	}
+}
 
 #define WM_USER_SHELLICON WM_USER + 1
 #define IDM_EXIT WM_USER + 2
+#define IDM_OPEN WM_USER + 3
 LRESULT CALLBACK WndProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 {
 	LRESULT Result = 0;
@@ -873,6 +661,7 @@ LRESULT CALLBACK WndProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 					POINT CursorPos;
 					GetCursorPos(&CursorPos);
 					HMENU hPopMenu = CreatePopupMenu();
+					InsertMenu(hPopMenu, (ui32)-1, MF_BYPOSITION | MF_STRING, IDM_OPEN, L"Open");
 					InsertMenu(hPopMenu, (ui32)-1, MF_BYPOSITION | MF_STRING, IDM_EXIT, L"Exit");
 					SetForegroundWindow(Wnd);
 					TrackPopupMenu(hPopMenu, TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_LEFTBUTTON, CursorPos.x, CursorPos.y, 0, Wnd, NULL);
@@ -887,6 +676,9 @@ LRESULT CALLBACK WndProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 		{
 			switch(LOWORD(W))
 			{
+				case IDM_OPEN:
+					ShowWindow(Wnd, true);
+					break;
 				case IDM_EXIT:
 					PostQuitMessage(0);
 					break;
@@ -895,6 +687,10 @@ LRESULT CALLBACK WndProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 			}
 			break;
 		}
+
+		case WM_SIZE:
+			UpdateWindowSize(*WD, Wnd, W, L);
+			break;
 
 		case WM_QUERYENDSESSION:
 		{
@@ -914,39 +710,67 @@ LRESULT CALLBACK WndProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 	return Result;
 }
 
+LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L);
+
 DWORD WINAPI NotifIconThread(void *Args)
 {
+	// TODO: Use manifest file instead, as msdn suggests (https://docs.microsoft.com/en-us/windows/win32/hidpi/setting-the-default-dpi-awareness-for-a-process)?
+	assert(SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2));
+
 	HINSTANCE hInstance = (HINSTANCE)Args;
 
-	win_data WD;
-	HWND Window;
+	win_data WD = {};
+	HWND Window, TimeMainGraph;
 	NOTIFYICONDATA NotifIcon;
 	{
-		WNDCLASSEX WndClass;
-		memset(&WndClass, 0, sizeof(WNDCLASSEX));
-		WndClass.cbSize = sizeof(WNDCLASSEX);
-		WndClass.lpfnWndProc = &WndProc;
-		WndClass.hInstance = hInstance;
-		WndClass.lpszClassName = L"timen";
-		WndClass.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-		WndClass.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
-		assert(RegisterClassEx(&WndClass));
-		Window = CreateWindow(WndClass.lpszClassName, L"timen", WS_MINIMIZE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, hInstance, 0);
-		assert(Window != INVALID_HANDLE_VALUE);
-		SetWindowLongPtr(Window, GWLP_USERDATA, (LONG_PTR)&WD);
+		WD.BGColor = RGB(0, 80, 120);
+
+		{
+			WNDCLASSEX WndClass = {sizeof(WNDCLASSEX)};
+			WndClass.lpfnWndProc = &WndProc;
+			WndClass.hInstance = hInstance;
+			WndClass.lpszClassName = L"timen";
+			WndClass.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+			WndClass.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
+			WndClass.style = CS_OWNDC;
+			WndClass.hbrBackground = CreateSolidBrush(WD.BGColor);
+			assert(RegisterClassEx(&WndClass));
+			Window = CreateWindow(WndClass.lpszClassName, L"timen", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, hInstance, 0);
+			assert(Window != INVALID_HANDLE_VALUE);
+			SetWindowLongPtr(Window, GWLP_USERDATA, (LONG_PTR)&WD);
+		}
+
+		{
+			WNDCLASS WndClass = {};
+			WndClass.lpfnWndProc = &TimeMainGraphProc;
+			WndClass.hInstance = hInstance;
+			WndClass.lpszClassName = L"time graph";
+			WndClass.style = CS_OWNDC;
+			assert(RegisterClass(&WndClass));
+			TimeMainGraph = CreateWindow(WndClass.lpszClassName, L"time graph", WS_CHILD | WS_VISIBLE, 50, 50, CW_USEDEFAULT, CW_USEDEFAULT, Window, 0, hInstance, 0);
+			assert(TimeMainGraph != INVALID_HANDLE_VALUE);
+			SetWindowLongPtr(TimeMainGraph, GWLP_USERDATA, (LONG_PTR)&WD);
+			WD.TimeMainGraph = TimeMainGraph;
+
+			RECT WinRect;
+			GetClientRect(Window, &WinRect);
+			UpdateWindowSize(WD, Window, SIZE_RESTORED, MAKELPARAM(WinRect.right - WinRect.left, WinRect.bottom - WinRect.top));
+		}
 
 		WD.NotifIcon = &NotifIcon;
-
-		memset(&NotifIcon, 0, sizeof(NOTIFYICONDATA));
-		NotifIcon.cbSize = sizeof(NOTIFYICONDATA);
+		NotifIcon = {sizeof(NOTIFYICONDATA)};
 		NotifIcon.hWnd = Window;
 		NotifIcon.uID = 0;
 		NotifIcon.hIcon = LoadIcon(NULL, IDI_APPLICATION);
 		NotifIcon.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
 		NotifIcon.uCallbackMessage = WM_USER_SHELLICON;
-		wcscpy_s(NotifIcon.szTip, ArrayLength(NotifIcon.szTip), L"timen");
+		wcscpy_s(NotifIcon.szTip, ArrLen(NotifIcon.szTip), L"timen");
 		assert(Shell_NotifyIcon(NIM_ADD, &NotifIcon));
 	}
+
+#ifdef DEBUG
+	ShowWindow(Window, true);
+#endif
 
 	MSG Msg;
 	while(GetMessage(&Msg, Window, 0, 0))
@@ -962,4 +786,201 @@ DWORD WINAPI NotifIconThread(void *Args)
 
 	Running = false;
 	return 0;
+}
+
+#include "gl_graphics.cpp"
+
+LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
+{
+	LRESULT Result = 0;
+	win_data *WD = (win_data *)GetWindowLongPtr(Wnd, GWLP_USERDATA);
+
+	switch(Msg)
+	{
+		case WM_CREATE:
+			InitOpenGL(GetDC(Wnd));
+			break;
+
+		case WM_MOUSEWHEEL:
+			RedrawWindow(Wnd, 0, 0, RDW_INVALIDATE);
+			break;
+
+		// TODO: Test if DPICHANGED is handled correctly by using multiple monitors.
+		// TODO: Follow tutorial on https://docs.microsoft.com/en-us/windows/win32/hidpi/high-dpi-desktop-application-development-on-windows and https://github.com/tringi/win32-dpi
+		case WM_DPICHANGED:
+		case WM_SIZE:
+		{
+			HMONITOR Monitor = MonitorFromWindow(Wnd, MONITOR_DEFAULTTONEAREST);
+			DEVICE_SCALE_FACTOR ScaleFactor;
+			GetScaleFactorForMonitor(Monitor, &ScaleFactor);
+			f32 DPIScale = ScaleFactor / 100.0f;
+
+			uint Width = (uint)(LOWORD(L) * DPIScale), Height = (uint)(HIWORD(L) * DPIScale);
+			UpdateFramebuffers(Width, Height);
+			glViewport(0, 0, Width, Height);
+			RedrawWindow(Wnd, 0, 0, RDW_INVALIDATE);
+			Result = DefWindowProc(Wnd, Msg, W, L);
+		}
+		break;
+
+		case WM_PAINT:
+		{
+			const f32 MinTime = 5.0f;
+			const f32 MaxTime = 20.0f;
+			const uint ProgCount = 5;
+			const f32 MaxAccumTime = MaxTime * ProgCount;
+			const uint Days = 12;
+			const uint EntryCount = ProgCount * Days;
+			f32 ProgramValues[EntryCount];
+			for(size_t d = 0; d < Days; d++)
+			{
+				for(size_t p = 0; p < ProgCount; p++)
+				{
+					size_t Index = d * ProgCount + p;
+					ProgramValues[Index] = (MinTime + (float)rand() / RAND_MAX * (MaxTime - MinTime)) / MaxAccumTime * 2.0f - 1.0f;
+					if(p != 0)
+					{
+						ProgramValues[Index] += ProgramValues[Index - 1] + 1.0f;
+					}
+				}
+			}
+
+			persist uint VAO, VBO, CalProg;
+			persist uint QuadVAO, FBProg;
+			//if(VAO)
+			//{
+			//	glDeleteVertexArrays(1, &VAO);
+			//	glDeleteBuffers(1, &VBO);
+			//}
+			//else
+			if(!VAO)
+			{
+				CreateProgramFromPaths(CalProg, "time_prog.vert", "time_prog.frag");
+				CreateProgramFromPaths(FBProg, "framebuffer.vert", "framebuffer.frag");
+
+				{
+					glGenVertexArrays(1, &VAO);
+					glGenBuffers(1, &VBO);
+
+					glBindVertexArray(VAO);
+					{
+						glBindBuffer(GL_ARRAY_BUFFER, VBO);
+						glBufferData(GL_ARRAY_BUFFER, sizeof(v2) * Days * 2, 0, GL_STATIC_DRAW);
+						glVertexAttribPointer(0, 2, GL_FLOAT, false, sizeof(v2), 0);
+						glEnableVertexAttribArray(0);
+					}
+					glBindVertexArray(0);
+				}
+
+				{
+					uint QuadVBOs[2];
+					glGenVertexArrays(1, &QuadVAO);
+					glGenBuffers(2, QuadVBOs);
+
+					glBindVertexArray(QuadVAO);
+					{
+						v2 QuadVerts[6] =
+								{
+										{-1.0f, -1.0f},
+										{1.0f, -1.0f},
+										{1.0f, 1.0f},
+
+										{-1.0f, -1.0f},
+										{1.0f, 1.0f},
+										{-1.0f, 1.0f},
+								};
+						v2 QuadUVs[6] =
+								{
+										{0.0f, 0.0f},
+										{1.0f, 0.0f},
+										{1.0f, 1.0f},
+
+										{0.0f, 0.0f},
+										{1.0f, 1.0f},
+										{0.0f, 1.0f},
+								};
+
+						glBindBuffer(GL_ARRAY_BUFFER, QuadVBOs[0]);
+						glBufferData(GL_ARRAY_BUFFER, sizeof(QuadVerts), QuadVerts, GL_STATIC_DRAW);
+						glVertexAttribPointer(0, 2, GL_FLOAT, false, sizeof(v2), 0);
+						glEnableVertexAttribArray(0);
+
+						glBindBuffer(GL_ARRAY_BUFFER, QuadVBOs[1]);
+						glBufferData(GL_ARRAY_BUFFER, sizeof(QuadUVs), QuadUVs, GL_STATIC_DRAW);
+						glVertexAttribPointer(1, 2, GL_FLOAT, false, sizeof(v2), 0);
+						glEnableVertexAttribArray(1);
+					}
+					glBindVertexArray(0);
+				}
+			}
+
+
+			PAINTSTRUCT PS;
+			HDC DC = BeginPaint(Wnd, &PS);
+
+			glBindFramebuffer(GL_FRAMEBUFFER, MSFrameBuf);
+			glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+			glUseProgram(CalProg);
+			glBindVertexArray(VAO);
+
+			for(size_t p = 0; p < ProgCount; p++)
+			{
+				// TODO: Space out all colors, also space them out from background and special colors (like black, magenta?).
+				// TODO: If an 'Other' section is added, make it light gray or some boring color.
+				f32 Color[3];
+				for(size_t i = 0; i < 3; i++)
+				{
+					Color[i] = (f32)rand() / RAND_MAX;
+				}
+				glUniform3fv(glGetUniformLocation(CalProg, "uColor"), 1, Color);
+
+				v2 Points[Days * 2] = {};
+				for(size_t d = 0; d < Days; d++)
+				{
+					f32 x = ((f32)d / (Days - 1)) * 2.0f - 1.0f;
+					if(p != 0)
+					{
+						Points[2 * d] = {x, ProgramValues[d * ProgCount + p - 1]};
+					}
+					else
+					{
+						Points[2 * d] = {x, -1.0f};
+					}
+					Points[2 * d + 1] = {x, ProgramValues[d * ProgCount + p]};
+				}
+
+				glBindBuffer(GL_ARRAY_BUFFER, VBO);
+				glBufferData(GL_ARRAY_BUFFER, sizeof(v2) * Days * 2, Points, GL_STATIC_DRAW);
+				glDrawArrays(GL_TRIANGLE_STRIP, 0, Days * 2);
+			}
+
+			RECT ClientRect;
+			GetClientRect(Wnd, &ClientRect);
+			uint ScreenWidth = ClientRect.right - ClientRect.left;
+			uint ScreenHeight = ClientRect.bottom - ClientRect.top;
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, MSFrameBuf);
+			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, IntermFrameBuf);
+			glBlitFramebuffer(0, 0, ScreenWidth, ScreenHeight, 0, 0, ScreenWidth, ScreenHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			glClearColor(1.0f, 0.0f, 1.0f, 1.0f);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+			glUseProgram(FBProg);
+			glBindVertexArray(QuadVAO);
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, IntermTex);
+			glDrawArrays(GL_TRIANGLES, 0, 6);
+			SwapBuffers(DC);
+
+			EndPaint(Wnd, &PS);
+			return 0;
+		}
+
+		default:
+			Result = DefWindowProc(Wnd, Msg, W, L);
+	}
+
+	return Result;
 }
