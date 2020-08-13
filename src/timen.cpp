@@ -667,11 +667,18 @@ int __stdcall main(HINSTANCE hInstance,
 	return 0;
 }
 
+typedef struct time_graph_data
+{
+	uint VAO, VBO, CalProg;
+	uint QuadVAO, FBProg;
+} time_graph_data;
+
 typedef struct win_data
 {
-	HWND TimeMainGraph;
 	NOTIFYICONDATA *NotifIcon;
 	COLORREF BGColor;
+	HWND TimeGraphWnd;
+	time_graph_data TimeGraphData;
 } win_data;
 
 typedef struct v2
@@ -683,14 +690,14 @@ void ResizeTimeGraph(HWND Wnd, UINT Msg, WPARAM W, LPARAM L);
 
 void UpdateWindowSize(win_data &WD, HWND Wnd, WPARAM W, LPARAM L)
 {
-	if(WD.TimeMainGraph)
+	if(WD.TimeGraphWnd)
 	{
 		int PosX = 50, PosY = 50;
 		int Width = (LOWORD(L) - PosX) / 2, Height = (HIWORD(L) - PosY) / 2;
 
 		if(Width > 0 && Height > 0)
 		{
-			SetWindowPos(WD.TimeMainGraph, 0, 0, 0, Width, Height, SWP_NOMOVE);
+			SetWindowPos(WD.TimeGraphWnd, 0, 0, 0, Width, Height, SWP_NOMOVE);
 		}
 	}
 }
@@ -802,7 +809,7 @@ DWORD WINAPI NotifIconThread(void *Args)
 			TimeMainGraph = CreateWindow(WndClass.lpszClassName, L"time graph", WS_CHILD | WS_VISIBLE, 50, 50, CW_USEDEFAULT, CW_USEDEFAULT, Window, 0, hInstance, 0);
 			assert(TimeMainGraph != INVALID_HANDLE_VALUE);
 			SetWindowLongPtr(TimeMainGraph, GWLP_USERDATA, (LONG_PTR)&WD);
-			WD.TimeMainGraph = TimeMainGraph;
+			WD.TimeGraphWnd = TimeMainGraph;
 
 			RECT WinRect;
 			GetClientRect(Window, &WinRect);
@@ -842,16 +849,114 @@ DWORD WINAPI NotifIconThread(void *Args)
 
 #include "gl_graphics.cpp"
 
+void InitTimeGraph(time_graph_data &tgd, uint Hours)
+{
+	//if(VAO)
+	//{
+	//	glDeleteVertexArrays(1, &VAO);
+	//	glDeleteBuffers(1, &VBO);
+	//}
+	//else
+	if(!tgd.VAO)
+	{
+		CreateProgramFromPaths(tgd.CalProg, "time_prog.vert", "time_prog.frag");
+		CreateProgramFromPaths(tgd.FBProg, "framebuffer.vert", "framebuffer.frag");
+
+		{
+			glGenVertexArrays(1, &tgd.VAO);
+			glGenBuffers(1, &tgd.VBO);
+
+			glBindVertexArray(tgd.VAO);
+			{
+				glBindBuffer(GL_ARRAY_BUFFER, tgd.VBO);
+				glBufferData(GL_ARRAY_BUFFER, sizeof(v2) * Hours * 2, 0, GL_STATIC_DRAW);
+				glVertexAttribPointer(0, 2, GL_FLOAT, false, sizeof(v2), 0);
+				glEnableVertexAttribArray(0);
+			}
+			glBindVertexArray(0);
+		}
+
+		{
+			uint QuadVBOs[2];
+			glGenVertexArrays(1, &tgd.QuadVAO);
+			glGenBuffers(2, QuadVBOs);
+
+			glBindVertexArray(tgd.QuadVAO);
+			{
+				v2 QuadVerts[6] =
+						{
+								{-1.0f, -1.0f},
+								{1.0f, -1.0f},
+								{1.0f, 1.0f},
+
+								{-1.0f, -1.0f},
+								{1.0f, 1.0f},
+								{-1.0f, 1.0f},
+						};
+				v2 QuadUVs[6] =
+						{
+								{0.0f, 0.0f},
+								{1.0f, 0.0f},
+								{1.0f, 1.0f},
+
+								{0.0f, 0.0f},
+								{1.0f, 1.0f},
+								{0.0f, 1.0f},
+						};
+
+				glBindBuffer(GL_ARRAY_BUFFER, QuadVBOs[0]);
+				glBufferData(GL_ARRAY_BUFFER, sizeof(QuadVerts), QuadVerts, GL_STATIC_DRAW);
+				glVertexAttribPointer(0, 2, GL_FLOAT, false, sizeof(v2), 0);
+				glEnableVertexAttribArray(0);
+
+				glBindBuffer(GL_ARRAY_BUFFER, QuadVBOs[1]);
+				glBufferData(GL_ARRAY_BUFFER, sizeof(QuadUVs), QuadUVs, GL_STATIC_DRAW);
+				glVertexAttribPointer(1, 2, GL_FLOAT, false, sizeof(v2), 0);
+				glEnableVertexAttribArray(1);
+			}
+			glBindVertexArray(0);
+		}
+	}
+}
+
+ui64 CreateTimestamp(uint Year, uint Month = 0, uint Day = 0, uint Hour = 0, uint Minute = 0, uint Second = 0)
+{
+	FILETIME FileTime;
+	SYSTEMTIME SysTime = {};
+	SysTime.wYear = (WORD)Year;
+	SysTime.wMonth = (WORD)Month;
+	SysTime.wDay = (WORD)Day;
+	SysTime.wHour = (WORD)Hour;
+	SysTime.wMinute = (WORD)Minute;
+	SysTime.wSecond = (WORD)Second;
+	SystemTimeToFileTime(&SysTime, &FileTime);
+	return ULARGE_INTEGER{FileTime.dwLowDateTime, FileTime.dwHighDateTime}.QuadPart / SToFiletime;
+}
+
+// TODO NOW: Remove
+#include <vector>
+
 LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 {
 	LRESULT Result = 0;
 	win_data *WD = (win_data *)GetWindowLongPtr(Wnd, GWLP_USERDATA);
+	time_graph_data &tgd = WD->TimeGraphData;
+
+	const f32 MinTime = 5.0f;
+	const f32 MaxTime = 20.0f;
+	const uint ProgCount = 64;
+	const f32 MaxAccumTime = MaxTime * ProgCount;
+	const uint Hours = 8;
+	const uint EntryCount = ProgCount * Hours;
+	f32 ProgramValues[EntryCount];
 
 	switch(Msg)
 	{
 		case WM_CREATE:
+		{
 			InitOpenGL(GetDC(Wnd));
-			break;
+		}
+		break;
 
 		case WM_MOUSEWHEEL:
 			RedrawWindow(Wnd, 0, 0, RDW_INVALIDATE);
@@ -862,6 +967,7 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 		case WM_DPICHANGED:
 		case WM_SIZE:
 		{
+			// TODO: Fix for all DPIs.
 			HMONITOR Monitor = MonitorFromWindow(Wnd, MONITOR_DEFAULTTONEAREST);
 			DEVICE_SCALE_FACTOR ScaleFactor;
 			GetScaleFactorForMonitor(Monitor, &ScaleFactor);
@@ -875,94 +981,216 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 		}
 		break;
 
+		// TODO: Paint live while logging, if the window is active
+		// TODO: Refactor to unit test
+		// TODO: Go again over this whole mess
 		case WM_PAINT:
 		{
-			const f32 MinTime = 5.0f;
-			const f32 MaxTime = 20.0f;
-			const uint ProgCount = 5;
-			const f32 MaxAccumTime = MaxTime * ProgCount;
-			const uint Days = 12;
-			const uint EntryCount = ProgCount * Days;
-			f32 ProgramValues[EntryCount];
-			for(size_t d = 0; d < Days; d++)
+			if(!tgd.VAO)
+			{
+				InitTimeGraph(tgd, Hours);
+			}
+
+			// TODO NOW: Try with sub-hour precision dates.
+			// 8/10/2020 16 14 5   17 55 44
+			//ui64 StartDate = CreateTimestamp(2020, 8, 10, 15, 0, 5);
+			//ui64 EndDate = CreateTimestamp(2020, 8, 10, 17, 55, 44);
+
+			ui64 StartDate = 13241808709;
+			ui64 EndDate = CreateTimestamp(2020, 8, 13, 20, 55, 44);
+
+			typedef struct stamp_info
+			{
+				// The marker which points to an activity in the main log file.
+				ui64 Marker;
+				// The time at which that activity started.
+				ui64 Time;
+			} stamp_info;
+
+			// Find the range of the file where the activities to collect are.
+			// TODO NOW: Some type of read/write protection or other mechanism, since main thread already writes to the file.
+			bool FoundStart = false, FoundEnd = false;
+			ui64 StpFileSize;
+			char *StpBuf = (char *)LoadFileContents(StampFilename, &StpFileSize);
+			// Includes all timestamps in the requested range, but also the two timestamps before and after.
+			std::vector<stamp_info> InclDateStamps;
+			{
+				assert(StartDate < EndDate);
+				char *FilePos = StpBuf;
+
+				ui64 LastStpDate = 0;
+				ui64 LastStpMarker = 0;
+				while((ui64)(FilePos - StpBuf) < StpFileSize)
+				{
+					ui64 StpDate = strtoull(FilePos, &FilePos, 10);
+					char *StpMarkerStr = strchr(FilePos, ' ') + 1;
+					ui64 StpMarker = strtoull(StpMarkerStr, 0, 10);
+					if(!FoundStart)
+					{
+						if(StpDate > StartDate)
+						{
+							assert(!LastStpDate || LastStpDate <= StartDate);
+							FoundStart = true;
+							FilePos++;
+
+							if(LastStpDate)
+							{
+								InclDateStamps.push_back({LastStpMarker, LastStpDate});
+							}
+							else
+							{
+								InclDateStamps.push_back({StpMarker, StpDate});
+							}
+						}
+					}
+
+					if(FoundStart)
+					{
+						InclDateStamps.push_back({StpMarker, StpDate});
+
+						if(StpDate >= EndDate)
+						{
+							if(AfterNextEOL(StpMarkerStr))
+							{
+								EndDate = StpDate;
+							}
+							else
+							{
+								InclDateStamps.push_back({StpFileSize, EndDate});
+							}
+							FoundEnd = true;
+							break;
+						}
+					}
+
+					FilePos = AfterNextEOL(StpMarkerStr);
+					LastStpDate = StpDate;
+					LastStpMarker = StpMarker;
+				}
+
+				if(!FoundStart)
+				{
+					assert(InclDateStamps.size() == 0);
+				}
+
+				if(!FoundEnd)
+				{
+					// TODO NOW: Implement
+				}
+			}
+
+			// Process the activities to make presentable data out of them.
+			// TODO NOW: Make vector as long as the amount of created processes, instead of ProgCount
+			std::vector<f64> ActivityTimes(ProgCount * Hours);
+			if(InclDateStamps.size())
+			{
+				// There must be at least two timestamps, since otherwise this doesn't represent a range.
+				assert(InclDateStamps.size() >= 2);
+
+				// Start date must be before the second stamp, since the stamp is included in the range.
+				assert(StartDate <= InclDateStamps[1].Time);
+				// Same as above, but for end date.
+				assert((InclDateStamps.end() - 2)->Time <= EndDate);
+
+				ui64 StartMarker = InclDateStamps.front().Marker, EndMarker = InclDateStamps.back().Marker;
+				// TODO NOW:	set endmarker to end of file if last marker in range is the last one in stp file
+				ui64 StartStpTime = InclDateStamps.front().Time;
+				ui32 FileRangeSize = (ui32)(EndMarker - StartMarker);
+				void *LogFile = OpenFile(LogFilename, FA_Read, FS_All);
+				LARGE_INTEGER FilePointer;
+				FilePointer.QuadPart = StartMarker;
+				assert(SetFilePointerEx(LogFile, FilePointer, 0, FILE_BEGIN) != INVALID_SET_FILE_POINTER);
+				file_result FileResult;
+				char *LogBuf = (char *)ReadFileContents(LogFile, FileRangeSize, &FileResult);
+				assert(FileResult == file_result::Success);
+
+				char *LogPos = LogBuf;
+				i32 CurStp = 0;
+				stamp_info NextStpInfo = InclDateStamps[CurStp + 1];
+				ui32 CurHour = 0;
+
+				bool StartCounting = false;
+				i64 TimeUntilStartDate = (StartDate - InclDateStamps.front().Time);
+				i64 TimeUntilEndDate = (InclDateStamps.back().Time - EndDate);
+
+				while(LogPos >= LogBuf && ((ptrdiff_t)LogPos - (ptrdiff_t)LogBuf) < FileRangeSize)
+				{
+					while(NextStpInfo.Marker <= (StartMarker + (LogPos - LogBuf)))
+					{
+						CurHour = (ui32)((NextStpInfo.Time) / TimeDivS - StartStpTime / TimeDivS);
+						assert(CurHour <= 7);
+						CurStp++;
+						if(CurStp == InclDateStamps.size() - 1)
+						{
+							break;
+						}
+						NextStpInfo = InclDateStamps[CurStp + 1];
+					}
+
+					LogPos = AfterNextEOL(LogPos);
+					assert(LogPos);
+					i32 AIndex = atoi(LogPos);
+					// TODO NOW: Replace with actual amount of processes
+					LogPos = AfterNextEOL(LogPos);
+					char *Indi = AfterNextEOL(LogPos);
+					LogPos = Indi;
+					f32 ATimeF = (f32)atof(LogPos);
+					ui64 ATime = (ui64)(ATimeF * SToFiletime);
+					// assert(ATime > MinProgramTime);
+					LogPos = AfterNextEOL(LogPos);
+					LogPos = AfterNextEOL(LogPos);
+
+					if(!StartCounting)
+					{
+						TimeUntilStartDate -= ATime;
+						if(TimeUntilStartDate <= 0)
+						{
+							StartCounting = true;
+						}
+					}
+
+					if(StartCounting)
+					{
+						if(AIndex + 1 < ProgCount)
+						{
+							// TODO FIX: Many(all?) symbol entries are ignored and new ones are added. Many programs are counted as one, for some reason
+							uint AHIndex = (AIndex + 1) * Hours + CurHour;
+							ActivityTimes[AHIndex] += ATimeF;
+							// TODO FIX: Activity time is sometimes larger than division time (precision problem) [remove "+ 1.0f" after fix].
+							assert(ActivityTimes[AHIndex] <= TimeDivS + 1.0f);
+						}
+					}
+				}
+
+				FreeFileContents(LogBuf);
+			}
+			FreeFileContents(StpBuf);
+
+			// Find the largest spike in the graph for normalization.
+			f64 LargestTime = 0;
+			for(size_t h = 0; h < Hours; h++)
+			{
+				f64 AccumTime = 0;
+				for(size_t p = 0; p < ProgCount; p++)
+				{
+					AccumTime += ActivityTimes[p * Hours + h];
+				}
+				LargestTime = max(LargestTime, AccumTime);
+			}
+
+			const f32 GraphPaddingMult = 1.1f;
+			LargestTime *= GraphPaddingMult;
+
+			for(size_t h = 0; h < Hours; h++)
 			{
 				for(size_t p = 0; p < ProgCount; p++)
 				{
-					size_t Index = d * ProgCount + p;
-					ProgramValues[Index] = (MinTime + (float)rand() / RAND_MAX * (MaxTime - MinTime)) / MaxAccumTime * 2.0f - 1.0f;
+					size_t Index = h * ProgCount + p;
+					ProgramValues[Index] = (f32)(ActivityTimes[p * Hours + h] / LargestTime * 2.0f - 1.0f);
 					if(p != 0)
 					{
 						ProgramValues[Index] += ProgramValues[Index - 1] + 1.0f;
 					}
-				}
-			}
-
-			persist uint VAO, VBO, CalProg;
-			persist uint QuadVAO, FBProg;
-			//if(VAO)
-			//{
-			//	glDeleteVertexArrays(1, &VAO);
-			//	glDeleteBuffers(1, &VBO);
-			//}
-			//else
-			if(!VAO)
-			{
-				CreateProgramFromPaths(CalProg, "time_prog.vert", "time_prog.frag");
-				CreateProgramFromPaths(FBProg, "framebuffer.vert", "framebuffer.frag");
-
-				{
-					glGenVertexArrays(1, &VAO);
-					glGenBuffers(1, &VBO);
-
-					glBindVertexArray(VAO);
-					{
-						glBindBuffer(GL_ARRAY_BUFFER, VBO);
-						glBufferData(GL_ARRAY_BUFFER, sizeof(v2) * Days * 2, 0, GL_STATIC_DRAW);
-						glVertexAttribPointer(0, 2, GL_FLOAT, false, sizeof(v2), 0);
-						glEnableVertexAttribArray(0);
-					}
-					glBindVertexArray(0);
-				}
-
-				{
-					uint QuadVBOs[2];
-					glGenVertexArrays(1, &QuadVAO);
-					glGenBuffers(2, QuadVBOs);
-
-					glBindVertexArray(QuadVAO);
-					{
-						v2 QuadVerts[6] =
-								{
-										{-1.0f, -1.0f},
-										{1.0f, -1.0f},
-										{1.0f, 1.0f},
-
-										{-1.0f, -1.0f},
-										{1.0f, 1.0f},
-										{-1.0f, 1.0f},
-								};
-						v2 QuadUVs[6] =
-								{
-										{0.0f, 0.0f},
-										{1.0f, 0.0f},
-										{1.0f, 1.0f},
-
-										{0.0f, 0.0f},
-										{1.0f, 1.0f},
-										{0.0f, 1.0f},
-								};
-
-						glBindBuffer(GL_ARRAY_BUFFER, QuadVBOs[0]);
-						glBufferData(GL_ARRAY_BUFFER, sizeof(QuadVerts), QuadVerts, GL_STATIC_DRAW);
-						glVertexAttribPointer(0, 2, GL_FLOAT, false, sizeof(v2), 0);
-						glEnableVertexAttribArray(0);
-
-						glBindBuffer(GL_ARRAY_BUFFER, QuadVBOs[1]);
-						glBufferData(GL_ARRAY_BUFFER, sizeof(QuadUVs), QuadUVs, GL_STATIC_DRAW);
-						glVertexAttribPointer(1, 2, GL_FLOAT, false, sizeof(v2), 0);
-						glEnableVertexAttribArray(1);
-					}
-					glBindVertexArray(0);
 				}
 			}
 
@@ -973,8 +1201,8 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 			glBindFramebuffer(GL_FRAMEBUFFER, MSFrameBuf);
 			glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-			glUseProgram(CalProg);
-			glBindVertexArray(VAO);
+			glUseProgram(tgd.CalProg);
+			glBindVertexArray(tgd.VAO);
 
 			for(size_t p = 0; p < ProgCount; p++)
 			{
@@ -985,26 +1213,26 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 				{
 					Color[i] = (f32)rand() / RAND_MAX;
 				}
-				glUniform3fv(glGetUniformLocation(CalProg, "uColor"), 1, Color);
+				glUniform3fv(glGetUniformLocation(tgd.CalProg, "uColor"), 1, Color);
 
-				v2 Points[Days * 2] = {};
-				for(size_t d = 0; d < Days; d++)
+				v2 Points[Hours * 2] = {};
+				for(size_t h = 0; h < Hours; h++)
 				{
-					f32 x = ((f32)d / (Days - 1)) * 2.0f - 1.0f;
+					f32 x = ((f32)h / (Hours - 1)) * 2.0f - 1.0f;
 					if(p != 0)
 					{
-						Points[2 * d] = {x, ProgramValues[d * ProgCount + p - 1]};
+						Points[2 * h] = {x, ProgramValues[h * ProgCount + p - 1]};
 					}
 					else
 					{
-						Points[2 * d] = {x, -1.0f};
+						Points[2 * h] = {x, -1.0f};
 					}
-					Points[2 * d + 1] = {x, ProgramValues[d * ProgCount + p]};
+					Points[2 * h + 1] = {x, ProgramValues[h * ProgCount + p]};
 				}
 
-				glBindBuffer(GL_ARRAY_BUFFER, VBO);
-				glBufferData(GL_ARRAY_BUFFER, sizeof(v2) * Days * 2, Points, GL_STATIC_DRAW);
-				glDrawArrays(GL_TRIANGLE_STRIP, 0, Days * 2);
+				glBindBuffer(GL_ARRAY_BUFFER, tgd.VBO);
+				glBufferData(GL_ARRAY_BUFFER, sizeof(v2) * Hours * 2, Points, GL_STATIC_DRAW);
+				glDrawArrays(GL_TRIANGLE_STRIP, 0, Hours * 2);
 			}
 
 			RECT ClientRect;
@@ -1019,8 +1247,8 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 			glClearColor(1.0f, 0.0f, 1.0f, 1.0f);
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-			glUseProgram(FBProg);
-			glBindVertexArray(QuadVAO);
+			glUseProgram(tgd.FBProg);
+			glBindVertexArray(tgd.QuadVAO);
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, IntermTex);
 			glDrawArrays(GL_TRIANGLES, 0, 6);
