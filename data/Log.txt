@@ -1,1 +1,50 @@
-P:\C++\timen\build\timen.exe,2,-,2.499047,,timen (Debugging) - Microsoft Visual Studio,2,-,0.002066,,Idle,-1,-,0.112681,,timen,0,-,1.488449,,Idle,-1,-,0.900078,,timen (Running) - Microsoft Visual Studio,2,-,0.098789,,Idle,-1,-,2.000938,,Idle,-1,-,0.100025,,timen,2,-,2.899973,,timen (Running) - Microsoft Visual Studio,2,-,0.003641,,timen (Running) - Microsoft Visual Studio,1,-,1.996335,,Task Switching,0,-,0.100311,,timen,0,-,0.900963,,timen,1,-,0.797837,,Task Switching,2,-,0.100400,,Idle,-1,-,2.102269,,Idle,-1,-,0.097925,,timen (Running) - Microsoft Visual Studio,2,-,0.399377,,Task Switching,4,-,1.399894,,High DPI Desktop Application Development on Windows - Win32 apps | Microsoft Docs and 4 more pages - Personal - Microsoft​ Edge,4,-,0.300497,,New tab and 5 more pages - Personal - Microsoft​ Edge,4,-,0.801161,,New tab and 5 more pages - Personal - Microsoft​ Edge,4,-,2.999996,,New tab and 5 more pages - Personal - Microsoft​ Edge,4,-,2.697938,,https://www.google.com/search?q=win32+dont+apply+dpi+scaling+to+window&oq=win32+dont+apply+dpi+scaling+to+window&aqs=chrome..69i57.5977j0j7&sourceid=chrome&ie=UTF-8 and 5 more pages - Personal - Microsoft​ Edge,4,-,0.299949,,win32 dont apply dpi scaling to window - Google Search and 5 more pages - Personal - Microsoft​ Edge,4,-,0.015762,,Idle,-1,-,1.884188,,win32 dont apply dpi scaling to window - Google Search and 5 more pages - Personal - Microsoft​ Edge,4,-,1.102757,,win32 dont apply dpi scaling to window - Google Search and 5 more pages - Personal - Microsoft​ Edge,4,-,2.998016,,win32 dont apply dpi scaling to window - Google Search and 5 more pages - Personal - Microsoft​ Edge,4,-,1.000457,,https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enablenonclientdpiscaling and 5 more pages - Personal - Microsoft​ Edge,4,-,0.299982,,EnableNonClientDpiScaling function (winuser.h) - Win32 apps | Microsoft Docs and 5 more pages - Personal - Microsoft​ Edge,4,-,1.699435,,Idle,-1,-,3.002202,,Idle,-1,-,3.000749,,Idle,-1,-,1.196167,,EnableNonClientDpiScaling function (winuser.h) - Win32 apps | Microsoft Docs and 5 more pages - Personal - Microsoft​ Edge,4,-,1.802323,,EnableNonClientDpiScaling function (winuser.h) - Win32 apps | Microsoft Docs and 5 more pages - Personal - Microsoft​ Edge,4,-,2.999565,,EnableNonClientDpiScaling function (winuser.h) - Win32 apps | Microsoft Docs and 5 more pages - Personal - Microsoft​ Edge,4,-,0.599344,,Idle,-1,-,2.402500,,Idle,-1,-,2.998629,,Idle,-1,-,3.000780,,Idle,-1,-,3.001593,,Idle,-1,-,2.795841,,EnableNonClientDpiScaling function (winuser.h) - Win32 apps | Microsoft Docs and 5 more pages - Personal - Microsoft​ Edge,4,-,0.204249,,EnableNonClientDpiScaling function (winuser.h) - Win32 apps | Microsoft Docs and 5 more pages - Personal - Microsoft​ Edge,4,-,2.997501,,EnableNonClientDpiScaling function (winuser.h) - Win32 apps | Microsoft Docs and 5 more pages - Personal - Microsoft​ Edge,4,-,0.099471,,Idle,-1,-,1.999259,,High DPI Desktop Application Development on Windows - Win32 apps | Microsoft Docs and 4 more pages - Personal - Microsoft​ Edge,4,-,0.900732,,Idle,-1,-,2.999347,,High DPI Desktop Application Development on Windows - Win32 apps | Microsoft Docs and 4 more pages - Personal - Microsoft​ Edge,4,-,0.002646,,High DPI Desktop Application Development on Windows - Win32 apps | Microsoft Docs and 4 more pages - Personal - Microsoft​ Edge,1,-,0.097155,,Task Switching,1,-,0.199335,,Idle,-1,-,2.401513,,Task Switching,1,-,0.301146,,Task Switching,0,-,0.198717,,timen,0,-,2.804383,,timen,0,-,2.995413,,timen,0,-,3.000415,,timen,0,-,3.000337,,timen,0,-,3.000369,,timen,0,-,3.000827,,timen,2,-,0.898500,,
+P:\C++\timen\build\timen.exe
+10
+-
+0.601267
+
+P:\C++\timen\build\timen.exe
+10
+-
+10.000148
+
+P:\C++\timen\build\timen.exe
+10
+-
+0.599441
+
+timen (Running) - Microsoft Visual Studio
+0
+-
+9.400512
+
+timen (Running) - Microsoft Visual Studio
+0
+-
+6.199787
+
+Task Switching
+1
+-
+3.799085
+
+Task Switching
+1
+-
+1.299874
+
+Reload
+2
+-
+2.200929
+
+X:\timen\data\Log.txt - Notepad++
+2
+-
+6.499771
+
+X:\timen\data\Log.txt - Notepad++
+2
+-
+0.599670
+

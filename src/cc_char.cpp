@@ -90,7 +90,7 @@ typedef enum eol_type
 } eol_type;
 
 global const eol_type EOLType = LF;
-global const char *EOLStr = ",";
+global const char *EOLStr = "\n"; // TODO NOW: Change back to comma or other non-line symbol once parsing is correct (title commas are also parsed!)
 global const ui32 EOLLen = (ui32)strlen(EOLStr);
 
 internal bool
@@ -136,6 +136,10 @@ EOLCount(const char *Str)
 internal char *
 AfterNextEOL(char *Str)
 {
+	if(!Str)
+	{
+		return 0;
+	}
 	do
 	{
 		if(*Str == EOLStr[0])

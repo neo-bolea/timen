@@ -1,9 +1,19 @@
 // TODO: Test program on integrated GPU
 /*
+	TODO: Add emulation functions (QueryPerformanceCounter, GetActiveProgram, etc.) for faster debugging.
+	TODO: Use md5/sha/crc/other for file corruption prevention? (e.g. md5 of each region between two stamps)
+	TODO: Save timestamp in other occasions then only when the program starts again, for example when the system shuts down. 
+	TODO: Microsoft Edge window title is wrong when queried (weird symbols after 't', then "Edge).
 	TODO: Investigate this (bug or expected bevavior?:
 		React:  Adding invalid program time ('Unknown' for 0.001550s) to next program ('Hourly Interrupt').
 		React:  Adding invalid program time ('Unknown' for 0.100530s) to next program ('P:\C++\timen\build\timen.exe').
 */
+
+// Used for text highlighting, since VS doesn't detect #defines specified in the build file.
+#ifndef VS_DUMMY
+#define DEBUG
+#define UNICODE
+#endif
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -41,12 +51,6 @@ typedef double f64;
 #define internal static
 #define global static
 #define persist static
-
-// Used for text highlighting, since VS doesn't detect #defines specified in the build file.
-#ifndef VS_DUMMY
-#define DEBUG
-#define UNICODE
-#endif
 
 #ifdef DEBUG
 #define assert(expr) \
@@ -121,6 +125,7 @@ FindSymbolInFile(proc_sym_table *Syms, const char *Str)
 }
 
 global const ui32 NEW_SYM_ID = UINT32_MAX;
+
 internal process_symbol
 AddSymToTable(proc_sym_table *Syms, const char *Str, ui64 Time, ui32 ID)
 {
@@ -175,7 +180,7 @@ ProcessProcSym(proc_sym_table *Syms, const char *Str)
 		return FileID;
 	}
 
-	// THe symbol doesn't exist yet, create it
+	// The symbol doesn't exist yet, create it
 	{
 		process_symbol NewSym = AddSymToTable(Syms, Str, Time, NEW_SYM_ID);
 
@@ -321,11 +326,38 @@ GetActiveProgramInfo(HWND ActiveWin, char *ProcBuf, ui32 ProcBufLen)
 std::atomic_bool Running = true;
 DWORD WINAPI NotifIconThread(void *Args);
 
+// Windows Filetime is in 100 nanoseconds intervals
+const ui64 MSToFiletime = 10000;
+const ui64 SToFiletime = 10000000;
+
+const char *LogFilename = "Log.txt";
+const char *SymFilename = "Log.sym";
+const char *StampFilename = "Log.stp";
+const wchar_t *LogFilenameW = L"Log.txt";
+const wchar_t *SymFilenameW = L"Log.sym";
+const wchar_t *StampFilenameW = L"Log.stp";
+
+const ui32 TimeDivS = 10;
+void AddStamp(HANDLE LogFile, HANDLE StampFile, ui64 Time)
+{
+	char TimeDivBuf[255];
+	LARGE_INTEGER LastActivityEnd;
+	assert(GetFileSizeEx(LogFile, &LastActivityEnd));
+	ui32 TimeDivLen = sprintf_s(TimeDivBuf, "%llu %llu%s", Time, LastActivityEnd.QuadPart, EOLStr);
+	DWORD BytesWritten;
+	assert(WriteFile(StampFile, TimeDivBuf, TimeDivLen, &BytesWritten, 0) && BytesWritten == TimeDivLen);
+}
+
+
 int __stdcall main(HINSTANCE hInstance,
 									 HINSTANCE hPrevInstance,
 									 LPSTR lpCmdLine,
 									 int nShowCmd)
 {
+	const wchar_t *DataDir = L"..\\data";
+	CreateDirectory(DataDir, 0);
+	assert(SetCurrentDirectory(DataDir));
+
 #ifdef DEBUG
 	DebugConsole = GetStdHandle(STD_OUTPUT_HANDLE);
 #endif
@@ -334,37 +366,32 @@ int __stdcall main(HINSTANCE hInstance,
 	HANDLE ThreadHnd = CreateThread(0, 0, NotifIconThread, hInstance, 0, &ThreadID);
 	assert(ThreadHnd != INVALID_HANDLE_VALUE);
 
-	const wchar_t *DataDir = L"..\\data";
-	CreateDirectory(DataDir, 0);
-	assert(SetCurrentDirectory(DataDir));
 
-	wchar_t *LogFilename = L"Log.txt";
-	wchar_t *SymFilename = L"Log.sym";
-	wchar_t *StampFilename = L"Log.stp";
+	WaitForSingleObject(ThreadHnd, INFINITE);
+	return 0;
 
-	proc_sym_table Symbols;
-	// By filling with zero we assure that unused symbol slots will be overwritten (since they will have a timestamp of 0, the oldest number)
-	memset(&Symbols, 0, sizeof(proc_sym_table));
+	// By initializing to zero we assure that unused symbol slots will be overwritten (since they will have a timestamp of 0, the oldest number)
+	proc_sym_table Symbols = {};
 
-	if(PathFileExists(LogFilename))
+	if(PathFileExists(LogFilenameW))
 	{
 #ifdef DEBUG
-		assert(DeleteFile(LogFilename));
+		assert(DeleteFile(LogFilenameW));
 #else
 		assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_NORMAL));
 #endif
 	}
-	HANDLE LogFile = CreateFile(LogFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+	HANDLE LogFile = CreateFile(LogFilenameW, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	assert(LogFile != INVALID_HANDLE_VALUE);
 
 	/*
 		The symbol file stores all process names, since they are very repetitive and do not have to be written each time.
 	*/
-	if(PathFileExists(SymFilename))
+	if(PathFileExists(SymFilenameW))
 	{
-		assert(SetFileAttributes(SymFilename, FILE_ATTRIBUTE_NORMAL));
+		assert(SetFileAttributes(SymFilenameW, FILE_ATTRIBUTE_NORMAL));
 	}
-	Symbols.SymFile = CreateFile(SymFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+	Symbols.SymFile = CreateFile(SymFilenameW, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	assert(Symbols.SymFile != INVALID_HANDLE_VALUE);
 
 	/*
@@ -376,7 +403,13 @@ int __stdcall main(HINSTANCE hInstance,
 		The stamp file indicates what time division started at which activity (e.g. 4th hour of 8/2/20 started at activity X),
 		thus allowing us to navigate the file (and efficiently at that).
 	*/
-	HANDLE StampFile = CreateFile(StampFilename, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+#ifdef DEBUG
+	if(PathFileExists(StampFilenameW))
+	{
+		assert(DeleteFile(StampFilenameW));
+	}
+#endif
+	HANDLE StampFile = CreateFile(StampFilenameW, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
 	assert(Symbols.SymFile != INVALID_HANDLE_VALUE);
 
 	// Count the amount of symbols that are currently stored, to correctly set the GUID
@@ -397,11 +430,8 @@ int __stdcall main(HINSTANCE hInstance,
 	// TODO: Switch to second granularity once finished debugging.
 	// TODO: Also log seconds, not milliseconds.
 	const ui32 SleepMS = 100;
-	const ui32 TimeDivS = 3;
-	const ui32 InactivityThreshMS = 2000;
+	const ui32 InactivityThreshMS = 20000;
 
-	// Windows Filetime is in 100 nanoseconds intervals
-	ui32 MSToFiletime = 10000;
 	ui32 Sleep100NS = SleepMS * MSToFiletime;
 
 	FILETIME SysTimeFile;
@@ -415,9 +445,20 @@ int __stdcall main(HINSTANCE hInstance,
 	LARGE_INTEGER QueryFreq;
 	QueryPerformanceFrequency(&QueryFreq);
 	LARGE_INTEGER ProcBegin = {}, ProcEnd = {};
-	char CurTitle[511] = "\0", ProcessName[MAX_PATH] = "\0";
+	// TODO NOW: Merge title and process to separate program struct (and all next_ and cur_ variables)?
+	char CurTitle[511] = "\0", CurProcessName[MAX_PATH] = "\0", NextProcessName[MAX_PATH] = "\0";
 
-	// TODO NOW: Set the hour to the last logged file hour
+	// Add a stamp, since we need to know when activity logging started again.
+	{
+		SYSTEMTIME SysTimeNow;
+		FILETIME FileTimeNow;
+		GetSystemTime(&SysTimeNow);
+		SystemTimeToFileTime(&SysTimeNow, &FileTimeNow);
+		ui64 CurTime = ULARGE_INTEGER{FileTimeNow.dwLowDateTime, FileTimeNow.dwHighDateTime}.QuadPart / SToFiletime;
+		AddStamp(LogFile, StampFile, CurTime);
+	}
+
+	// TODO NOW: Integrate this into the code
 	ULARGE_INTEGER YearBegin2020;
 	{
 		FILETIME FileTime2020;
@@ -429,6 +470,10 @@ int __stdcall main(HINSTANCE hInstance,
 		YearBegin2020.LowPart = FileTime2020.dwLowDateTime;
 		YearBegin2020.HighPart = FileTime2020.dwHighDateTime;
 	}
+
+	// TODO NOW: Remove
+	SYSTEMTIME SysTimeStart;
+	GetSystemTime(&SysTimeStart);
 
 	QueryPerformanceCounter(&ProcBegin);
 	WholeProgramBegin = ProcBegin;
@@ -469,7 +514,7 @@ int __stdcall main(HINSTANCE hInstance,
 				wchar_t NewTitleW[255];
 				ui32 NewTitleLen = GetWindowText(ActiveWin, NewTitleW, ArrLen(NewTitleW));
 
-				if(NewTitleLen && GetActiveProgramInfo(ActiveWin, ProcessName, ArrLen(ProcessName)))
+				if(NewTitleLen && GetActiveProgramInfo(ActiveWin, NextProcessName, ArrLen(NextProcessName)))
 				{
 					NarrowUTF(NextTitle, ArrLen(NextTitle), NewTitleW);
 					NextActivityType = AT_Prog;
@@ -477,11 +522,14 @@ int __stdcall main(HINSTANCE hInstance,
 			}
 		}
 
-		if((ActivityType != NextActivityType) || (strcmp(CurTitle, NextTitle) != 0))
+		char *CurLogName = 0, *NextLogName = 0;
+		bool ActivityChange = (ActivityType != NextActivityType) || (strcmp(CurTitle, NextTitle) != 0);
+		if(ActivityChange)
 		{
 			QueryPerformanceCounter(&ProcEnd);
 			LARGE_INTEGER NextProcBegin = ProcEnd;
 
+			// TODO: What about when the active program switched multiple times after the user became idle?
 			/*
 				If the user is becoming idle, we need to 'reclaim' the time that we counted as program time and
 				instead add it to the idle time, since we couldn't know if the user was idle until the idling 
@@ -496,31 +544,26 @@ int __stdcall main(HINSTANCE hInstance,
 				NextProcBegin.QuadPart -= AddedIdleTime;
 			}
 
-			char *CurLogName = GetActivityTitle(ActivityType, CurTitle);
-			char *NextLogName = GetActivityTitle(NextActivityType, NextTitle);
+			CurLogName = GetActivityTitle(ActivityType, CurTitle);
+			NextLogName = GetActivityTitle(NextActivityType, NextTitle);
 			LogProgram(LogFile, Symbols,
-								 CurLogName, NextLogName, ProcessName, "-",
+								 CurLogName, NextLogName, CurProcessName, "-",
 								 ActivityType, NextActivityType,
 								 ProcBegin, ProcEnd, NextProcBegin, QueryFreq);
 
 			ProcBegin = NextProcBegin;
-
-			Log("Switching from '%s' to '%s'\n", CurLogName, NextLogName);
-			strcpy_s(CurTitle, NextTitle);
 		}
-
-		ActivityType = NextActivityType;
 
 		if(Running)
 		{
 			// TODO: Is it defined behaviour to log two program in one loop pass?
-			// Check if the time division switched
+			// Check if the time division switched, and add a stamp if so.
 			{
 				SYSTEMTIME SysTimeNow;
 				FILETIME FileTimeNow;
 				GetSystemTime(&SysTimeNow);
 				SystemTimeToFileTime(&SysTimeNow, &FileTimeNow);
-				ui64 CurTimeDiv = ULARGE_INTEGER{FileTimeNow.dwLowDateTime, FileTimeNow.dwHighDateTime}.QuadPart / (TimeDivS * 1000LL * 1000LL * 10LL);
+				ui64 CurTimeDiv = ULARGE_INTEGER{FileTimeNow.dwLowDateTime, FileTimeNow.dwHighDateTime}.QuadPart / (TimeDivS * SToFiletime);
 
 				persist ui64 TimeDivLast = CurTimeDiv;
 				/*
@@ -535,21 +578,26 @@ int __stdcall main(HINSTANCE hInstance,
 
 					QueryPerformanceCounter(&ProcEnd);
 					LARGE_INTEGER NextProcBegin = ProcEnd;
-					char *CurLogName = GetActivityTitle(ActivityType, CurTitle);
+					CurLogName = GetActivityTitle(ActivityType, CurTitle);
 					LogProgram(LogFile, Symbols,
-										 CurLogName, "Time Division Interrupt", ProcessName, "-",
+										 CurLogName, "Time Division Interrupt", CurProcessName, "-",
 										 ActivityType, NextActivityType,
 										 ProcBegin, ProcEnd, NextProcBegin, QueryFreq);
 					ProcBegin = NextProcBegin;
 
 					// Write a stamp to indicate the activity with which the next time division is starting.
-					char TimeDivBuf[255];
-					LARGE_INTEGER LastActivityEnd;
-					assert(GetFileSizeEx(LogFile, &LastActivityEnd));
-					ui32 TimeDivLen = sprintf_s(TimeDivBuf, "%llu %llu%s", CurTimeDiv, LastActivityEnd.QuadPart, EOLStr);
-					DWORD BytesWritten;
-					assert(WriteFile(StampFile, TimeDivBuf, TimeDivLen, &BytesWritten, 0) && BytesWritten == TimeDivLen);
+					AddStamp(LogFile, StampFile, CurTimeDiv * TimeDivS);
 				}
+			}
+
+			ActivityType = NextActivityType;
+
+			// TODO NOW: Was location change necessary?
+			if(ActivityChange)
+			{
+				Log("Switching from '%s' to '%s'\n", CurLogName, NextLogName);
+				strcpy_s(CurTitle, NextTitle);
+				strcpy_s(CurProcessName, NextProcessName);
 			}
 
 			// Check for timing errors
@@ -596,6 +644,10 @@ int __stdcall main(HINSTANCE hInstance,
 			}
 		}
 	}
+
+	// TODO NOW: Remove
+	SYSTEMTIME SysTimeEnd;
+	GetSystemTime(&SysTimeEnd);
 
 	f64 TotalProgramTime = ((f64)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (f64)QueryFreq.QuadPart);
 	f64 TimeError = TotalProgramTime - AccumTimeMS;

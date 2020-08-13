@@ -141,6 +141,14 @@ ReadFileContents(void *FileHandle, void *Buffer, i32 BytesToRead)
 	return Result;
 }
 
+internal void *
+ReadFileContents(void *FileHandle, i32 BytesToRead, file_result *Result)
+{
+	void *Buffer = VirtualAlloc(0, BytesToRead, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	*Result = ReadFileContents(FileHandle, Buffer, BytesToRead);
+	return Buffer;
+}
+
 // TODO: Change FileBytesWritten to (u)i64?
 internal bool
 WriteFileContents(void *FileHandle, void *Buffer, i32 BytesToWrite)

@@ -13,7 +13,10 @@ Further diagram options:
 	Side diagram (smaller unit):
 		-Stacked vertical bars
 		
-Very, very far away possible design choices in the future:
-	-Groups of programs, so you can see only a few select programs in the main graph (and can select between different graph types, e.g. stock chart vs stacked default)
+Future design ideas:
+	-Idle time can optionally be 'reclaimed' to program time _after_ the fact (i.e. while visualizing). For each program, a minimum idle time can be specified, thus counting idle time towards the previously occuring program if it is shorter than that program's minimum idle time. Example: while programming, a higher idle time is allowed, since sometimes you need to think for long. So if the user is idle for two minutes after programming, that time could be counted towards programming.
+		
+Very, very far away possible design ideas in the future:
+	-Groups/'projects' of programs, so you can see only a few select programs in the main graph (and can select between different graph types, e.g. stock chart vs stacked default). That way you could have a group that encompasses all programming time, all (un)productive time, etc.
 	-Variable time ranges (i.e. not fixed to months, days, etc. but instead from any date to any other date)?
 	
