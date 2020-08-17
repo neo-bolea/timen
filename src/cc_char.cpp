@@ -50,7 +50,7 @@ StrStrRFind(char *Str, const char *SubStr, size_t StrLen = (size_t)-1, size_t Su
 internal void
 WidenUTF(wchar_t *Dst, i32 DstLen, const char *Src)
 {
-	assert(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, Src, -1, Dst, DstLen));
+	Assert(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, Src, -1, Dst, DstLen));
 }
 
 internal wchar_t *
@@ -65,7 +65,7 @@ WidenUTFAlloc(const char *Str)
 internal void
 NarrowUTF(char *Dst, i32 DstLen, wchar_t *Src)
 {
-	assert(WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Src, -1, Dst, DstLen, 0, 0));
+	Assert(WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Src, -1, Dst, DstLen, 0, 0));
 }
 
 internal char *

@@ -82,7 +82,7 @@ LoadGLFunctions()
 	HMODULE GLModule = LoadLibraryA("opengl32.dll");
 
 #define LOAD_GLAD_FUNC_EX(Handle, Name) \
-	assert(Handle == NULL);               \
+	Assert(Handle == NULL);               \
 	Handle = (decltype(Handle))LoadGLFunction(GLModule, Name)
 
 #define LOAD_GLAD_FUNC(Handle) LOAD_GLAD_FUNC_EX(Handle, #Handle)
@@ -91,6 +91,8 @@ LoadGLFunctions()
 	LOAD_GLAD_FUNC(glGetError);
 	LOAD_GLAD_FUNC(glGetString);
 	LOAD_GLAD_FUNC(glGetIntegerv);
+	LOAD_GLAD_FUNC(glDisable);
+	LOAD_GLAD_FUNC(glEnable);
 
 	LOAD_GLAD_FUNC(glViewport);
 
@@ -222,7 +224,7 @@ HGLRC InitOpenGL(HDC DC)
 		UNHANDLED_CODE_PATH;
 	}
 
-	assert(wglMakeCurrent(DC, DummyContext));
+	Assert(wglMakeCurrent(DC, DummyContext));
 
 	LoadGLFunctions();
 	if(!gladLoadWGL(DC))
@@ -259,7 +261,7 @@ HGLRC InitOpenGL(HDC DC)
 		UNHANDLED_CODE_PATH;
 	}
 
-	assert(wglMakeCurrent(DC, GraphicsContext));
+	Assert(wglMakeCurrent(DC, GraphicsContext));
 	wglDeleteContext(DummyContext);
 
 	return GraphicsContext;

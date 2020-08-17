@@ -122,8 +122,8 @@ internal ui32
 GetFileSize32(HANDLE File)
 {
 	LARGE_INTEGER FileSize64;
-	assert(GetFileSizeEx(File, &FileSize64));
-	assert(FileSize64.QuadPart < UINT32_MAX);
+	Assert(GetFileSizeEx(File, &FileSize64));
+	Assert(FileSize64.QuadPart < UINT32_MAX);
 	return (ui32)FileSize64.QuadPart;
 }
 
@@ -219,6 +219,6 @@ LoadFileContents(const char *Path, ui64 *FileSizeOut, i32 Access = FA_Read, i32 
 internal void
 FreeFileContents(void *FileContents)
 {
-	assert(FileContents);
+	Assert(FileContents);
 	VirtualFree(FileContents, 0, MEM_RELEASE);
 }

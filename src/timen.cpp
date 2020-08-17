@@ -17,6 +17,7 @@
 #endif
 
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <Windows.h>
 #include <Psapi.h>
 #include <shellapi.h>
@@ -54,25 +55,29 @@ typedef double f64;
 #define global static
 #define persist static
 
+// TODO FUTURE: Change all NoAsserts to Asserts.
+#define NoAssert(Expression) (Expression)
 #ifdef DEBUG
 // TODO: Convert some assertions to UNHANDLED_CODE_PATHs.
-#define assert(expr) \
+// NOTE: _Only_ use if an assertion is expected to fail at the moment and a fix is planned later.
+#define Assert(expr) \
 	if(!(expr))        \
 	{                  \
 		throw 0;         \
 	}                  \
 	0
 #else
-#define assert(Expression) (Expression)
+#define Assert(Expression) NoAssert(Expression)
 #endif
-#define UNDEFINED_CODE_PATH assert(false)
+#define UNDEFINED_CODE_PATH Assert(false)
 // Like UNDEFINED_CODE_PATH, but indicates that the affected code path needs to be worked on to handle the exception properly.
-#define UNHANDLED_CODE_PATH assert(false)
+#define UNHANDLED_CODE_PATH Assert(false)
 
 #define ArrLen(arr) (sizeof((arr)) / sizeof((arr)[0]))
 
 #define MIN(A, B) ((A) <= (B) ? (A) : (B))
 #define MAX(A, B) ((A) > (B) ? (A) : (B))
+#define CLAMP(V, min, max) (MAX(MIN((V), max), min))
 
 #ifdef DEBUG
 #define TruncAss(Type, n) (((n) == (decltype(n))(Type)(n)) ? 0 : (throw 0), (Type)(n))
@@ -100,16 +105,16 @@ typedef struct proc_sym_table
 internal ui32
 FindSymbolInFile(proc_sym_table *Syms, const char *Str)
 {
-	assert(Syms->SymFile != INVALID_HANDLE_VALUE);
+	Assert(Syms->SymFile != INVALID_HANDLE_VALUE);
 	ui32 FileSize = GetFileSize32(Syms->SymFile);
 	if(FileSize)
 	{
 		char *FileBuf = (char *)VirtualAlloc(0, FileSize + 1, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-		assert(FileBuf);
+		Assert(FileBuf);
 
-		assert(SetFilePointer(Syms->SymFile, 0, 0, FILE_BEGIN) != INVALID_SET_FILE_POINTER);
+		Assert(SetFilePointer(Syms->SymFile, 0, 0, FILE_BEGIN) != INVALID_SET_FILE_POINTER);
 		DWORD BytesRead;
-		assert(ReadFile(Syms->SymFile, FileBuf, FileSize, &BytesRead, 0) && BytesRead == FileSize);
+		Assert(ReadFile(Syms->SymFile, FileBuf, FileSize, &BytesRead, 0) && BytesRead == FileSize);
 		FileBuf[FileSize] = '\0';
 
 		char *FilePos = FileBuf;
@@ -164,12 +169,12 @@ AddSymToTable(proc_sym_table *Syms, const char *Str, ui64 Time, ui32 ID)
 internal ui32
 ProcessProcSym(proc_sym_table *Syms, const char *Str)
 {
-	assert(*Str);
+	Assert(*Str);
 
 	SYSTEMTIME SysTime;
 	FILETIME FileTime;
 	GetSystemTime(&SysTime);
-	assert(SystemTimeToFileTime(&SysTime, &FileTime));
+	Assert(SystemTimeToFileTime(&SysTime, &FileTime));
 	ui64 Time = (ui64)FileTime.dwLowDateTime | ((ui64)FileTime.dwHighDateTime << 32);
 
 	for(ui32 i = 0; i < ArrLen(Syms->Symbols); i++)
@@ -199,9 +204,9 @@ ProcessProcSym(proc_sym_table *Syms, const char *Str)
 		SymBufEnd = InsertEOL(SymBufEnd);
 		*SymBufEnd = '\0';
 		ui32 NewSymBufLen = (ui32)(SymBufEnd - NewSym.Str);
-		assert(SetFilePointer(Syms->SymFile, 0, 0, FILE_END) != INVALID_SET_FILE_POINTER);
-		assert(WriteFile(Syms->SymFile, NewSym.Str, NewSymBufLen, &BytesWritten, 0));
-		assert((i32)BytesWritten == NewSymBufLen);
+		Assert(SetFilePointer(Syms->SymFile, 0, 0, FILE_END) != INVALID_SET_FILE_POINTER);
+		Assert(WriteFile(Syms->SymFile, NewSym.Str, NewSymBufLen, &BytesWritten, 0));
+		Assert((i32)BytesWritten == NewSymBufLen);
 
 		return NewSym.ID;
 	}
@@ -280,7 +285,7 @@ activity_info &activity_info::operator=(activity_info &B)
 	if(A != B)
 	{
 		char *LogTitleA = GetActivityTitle(A), *LogTitleB = GetActivityTitle(B);
-		assert(strcmp(LogTitleA, LogTitleB) != 0);
+		Assert(strcmp(LogTitleA, LogTitleB) != 0);
 		Log("Switching from '%s' to '%s'\n", LogTitleA, LogTitleB);
 		strcpy_s(A.Title, B.Title);
 		strcpy_s(A.ProcessName, B.ProcessName);
@@ -303,8 +308,8 @@ char *ParseActivity(char *Str, i32 *ActSym, f32 *Time)
 	NEXT_EOL();
 	NEXT_EOL();
 	*Time = (f32)atof(Str);
-	assert(*Time > 0.0);
-	// assert(ATime > MinProgramTime);
+	Assert(*Time > 0.0);
+	// Assert(ATime > MinProgramTime);
 	NEXT_EOL();
 	NEXT_EOL();
 
@@ -318,7 +323,7 @@ LogActivity(HANDLE File, proc_sym_table &Symbols,
 						activity_type ActivityType, activity_type NextActivityType,
 						LARGE_INTEGER TimeBegin, LARGE_INTEGER TimeEnd, LARGE_INTEGER &NextTimeBegin, LARGE_INTEGER QueryFreq)
 {
-	assert(strcmp(Title, NextTitle) != 0);
+	Assert(strcmp(Title, NextTitle) != 0);
 
 	// Note: The program time can be negative if the user became idle before the program started, so we need to check for that...
 	f64 fProcTime = ((f64)(TimeEnd.QuadPart - TimeBegin.QuadPart) / (f64)QueryFreq.QuadPart);
@@ -331,14 +336,14 @@ LogActivity(HANDLE File, proc_sym_table &Symbols,
 			// TODO: Handle different types of slashes.
 			char *ProcName = strrchr(ProcessName, '\\') + 1;
 			ProcSymValue = ProcessProcSym(&Symbols, ProcName);
-			assert((i32)FindSymbolInFile(&Symbols, ProcName) == ProcSymValue);
+			Assert((i32)FindSymbolInFile(&Symbols, ProcName) == ProcSymValue);
 		}
 
 		// TODO: Don't log title if it proves to be unnecessary (especially since titles use up a lot of memory...).
 		// TODO: Add extra info to certain windows (e.g. tab/site info for browsers).
 		{
 			ui64 TitleLen = strlen(Title);
-			assert(TitleLen);
+			Assert(TitleLen);
 			// TODO: Fix this (this was a temp fix).
 			char LogBuffer[1024];
 			if(TitleLen > 1000)
@@ -350,8 +355,8 @@ LogActivity(HANDLE File, proc_sym_table &Symbols,
 			i32 LogLen = (i32)strlen(LogBuffer);
 
 			DWORD BytesWritten;
-			assert(SetFilePointer(File, 0, 0, FILE_END) != INVALID_SET_FILE_POINTER);
-			assert(WriteFile(File, LogBuffer, LogLen, &BytesWritten, 0) && (i32)BytesWritten == LogLen);
+			Assert(SetFilePointer(File, 0, 0, FILE_END) != INVALID_SET_FILE_POINTER);
+			Assert(WriteFile(File, LogBuffer, LogLen, &BytesWritten, 0) && (i32)BytesWritten == LogLen);
 		}
 
 #ifdef DEBUG
@@ -403,7 +408,7 @@ GetActiveProgramInfo(activity_info &Info)
 		return false;
 	}
 
-	assert(ProcID);
+	Assert(ProcID);
 	HANDLE FGProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, ProcID);
 	if(FGProc == INVALID_HANDLE_VALUE)
 	{
@@ -433,9 +438,9 @@ GetActiveProgramInfo(activity_info &Info)
 std::atomic_bool Running = true;
 DWORD WINAPI NotifIconThread(void *Args);
 
-// Windows Filetime is in 100 nanoseconds intervals
-const i64 MSToFiletime = 10000;
-const i64 SToFiletime = 10000000;
+// Windows FileTime is in 100 nanoseconds intervals
+const i64 MSToFileTime = 10000;
+const i64 SToFileTime = 10000000;
 
 const char *LogFilename = "Log.txt";
 const char *SymFilename = "Log.sym";
@@ -464,12 +469,12 @@ void StampToTimeStr(char *Buf, size_t BufLen, ui64 TimeS)
 {
 	SYSTEMTIME SysTime;
 	ULARGE_INTEGER Time64;
-	Time64.QuadPart = TimeS * SToFiletime + YearBegin2020;
-	FILETIME Filetime, LocalFiletime;
-	Filetime.dwLowDateTime = Time64.LowPart;
-	Filetime.dwHighDateTime = Time64.HighPart;
-	FileTimeToLocalFileTime(&Filetime, &LocalFiletime);
-	FileTimeToSystemTime(&LocalFiletime, &SysTime);
+	Time64.QuadPart = TimeS * SToFileTime + YearBegin2020;
+	FILETIME FileTime, LocalFileTime;
+	FileTime.dwLowDateTime = Time64.LowPart;
+	FileTime.dwHighDateTime = Time64.HighPart;
+	FileTimeToLocalFileTime(&FileTime, &LocalFileTime);
+	FileTimeToSystemTime(&LocalFileTime, &SysTime);
 	ui32 TimeDivLen = sprintf_s(Buf, BufLen, "%i/%i/%i, %ih:%im:%is",
 															SysTime.wMonth, SysTime.wDay, SysTime.wYear, SysTime.wHour, SysTime.wMinute, SysTime.wSecond);
 }
@@ -478,7 +483,7 @@ void AddStamp(HANDLE LogFile, HANDLE StampFile, ui64 TimeS)
 {
 	char TimeDivBuf[255], StampBuf[255];
 	LARGE_INTEGER LastActivityEnd;
-	assert(GetFileSizeEx(LogFile, &LastActivityEnd));
+	Assert(GetFileSizeEx(LogFile, &LastActivityEnd));
 #ifdef DEBUG
 	StampToTimeStr(StampBuf, ArrLen(StampBuf), TimeS);
 	ui32 TimeDivLen = sprintf_s(TimeDivBuf, "%llu %llu [%s]%s", TimeS, LastActivityEnd.QuadPart, StampBuf, EOLStr);
@@ -486,8 +491,8 @@ void AddStamp(HANDLE LogFile, HANDLE StampFile, ui64 TimeS)
 	ui32 TimeDivLen = sprintf_s(TimeDivBuf, "%llu %llu%s", Time, LastActivityEnd.QuadPart, EOLStr);
 #endif
 	DWORD BytesWritten;
-	assert(SetFilePointer(StampFile, 0, 0, FILE_END) != INVALID_SET_FILE_POINTER);
-	assert(WriteFile(StampFile, TimeDivBuf, TimeDivLen, &BytesWritten, 0) && BytesWritten == TimeDivLen);
+	Assert(SetFilePointer(StampFile, 0, 0, FILE_END) != INVALID_SET_FILE_POINTER);
+	Assert(WriteFile(StampFile, TimeDivBuf, TimeDivLen, &BytesWritten, 0) && BytesWritten == TimeDivLen);
 }
 
 #define DO_LOG 1
@@ -502,7 +507,7 @@ int __stdcall main(HINSTANCE hInstance,
 {
 	const wchar_t *DataDir = L"..\\data";
 	CreateDirectory(DataDir, 0);
-	assert(SetCurrentDirectory(DataDir));
+	Assert(SetCurrentDirectory(DataDir));
 
 #ifdef DEBUG
 	DebugConsole = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -511,7 +516,7 @@ int __stdcall main(HINSTANCE hInstance,
 #if WHAT_DO == DO_GRAPH
 	DWORD ThreadID;
 	HANDLE ThreadHnd = CreateThread(0, 0, NotifIconThread, hInstance, 0, &ThreadID);
-	assert(ThreadHnd != INVALID_HANDLE_VALUE);
+	Assert(ThreadHnd != INVALID_HANDLE_VALUE);
 
 	WaitForSingleObject(ThreadHnd, INFINITE);
 	return 0;
@@ -523,23 +528,23 @@ int __stdcall main(HINSTANCE hInstance,
 	if(PathFileExists(LogFilenameW))
 	{
 #ifdef DEBUG
-		//assert(DeleteFile(LogFilenameW));
+		//Assert(DeleteFile(LogFilenameW));
 #else
-		assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_NORMAL));
+		Assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_NORMAL));
 #endif
 	}
 	HANDLE LogFile = CreateFile(LogFilenameW, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
-	assert(LogFile != INVALID_HANDLE_VALUE);
+	Assert(LogFile != INVALID_HANDLE_VALUE);
 
 	/*
 		The symbol file stores all process names, since they are very repetitive and do not have to be written each time.
 	*/
 	if(PathFileExists(SymFilenameW))
 	{
-		assert(SetFileAttributes(SymFilenameW, FILE_ATTRIBUTE_NORMAL));
+		Assert(SetFileAttributes(SymFilenameW, FILE_ATTRIBUTE_NORMAL));
 	}
 	Symbols.SymFile = CreateFile(SymFilenameW, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
-	assert(Symbols.SymFile != INVALID_HANDLE_VALUE);
+	Assert(Symbols.SymFile != INVALID_HANDLE_VALUE);
 
 	/*
 		Time Divisions:
@@ -553,11 +558,11 @@ int __stdcall main(HINSTANCE hInstance,
 #ifdef DEBUG
 	if(PathFileExists(StampFilenameW))
 	{
-		//assert(DeleteFile(StampFilenameW));
+		//Assert(DeleteFile(StampFilenameW));
 	}
 #endif
 	HANDLE StampFile = CreateFile(StampFilenameW, GENERIC_WRITE | GENERIC_READ, FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
-	assert(Symbols.SymFile != INVALID_HANDLE_VALUE);
+	Assert(Symbols.SymFile != INVALID_HANDLE_VALUE);
 
 	// Count the amount of symbols that are currently stored, to correctly set the GUID
 	{
@@ -566,7 +571,7 @@ int __stdcall main(HINSTANCE hInstance,
 		{
 			char *FileBuf = (char *)VirtualAlloc(0, FileSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 			DWORD BytesRead;
-			assert(ReadFile(Symbols.SymFile, FileBuf, FileSize, &BytesRead, 0) && BytesRead == FileSize);
+			Assert(ReadFile(Symbols.SymFile, FileBuf, FileSize, &BytesRead, 0) && BytesRead == FileSize);
 
 			Symbols.GUID = EOLCount(FileBuf);
 
@@ -579,7 +584,7 @@ int __stdcall main(HINSTANCE hInstance,
 	const i32 SleepMS = 100;
 	const ui32 InactivityThreshMS = UINT32_MAX; //20000;
 
-	ui32 Sleep100NS = SleepMS * MSToFiletime;
+	ui32 Sleep100NS = SleepMS * MSToFileTime;
 
 	FILETIME SysTimeFile;
 	GetSystemTimeAsFileTime(&SysTimeFile);
@@ -599,7 +604,7 @@ int __stdcall main(HINSTANCE hInstance,
 		FILETIME FileTimeNow;
 		GetSystemTime(&SysTimeNow);
 		SystemTimeToFileTime(&SysTimeNow, &FileTimeNow);
-		ui64 CurTime = (ULARGE_INTEGER{FileTimeNow.dwLowDateTime, FileTimeNow.dwHighDateTime}.QuadPart - YearBegin2020) / SToFiletime;
+		ui64 CurTime = (ULARGE_INTEGER{FileTimeNow.dwLowDateTime, FileTimeNow.dwHighDateTime}.QuadPart - YearBegin2020) / SToFileTime;
 		AddStamp(LogFile, StampFile, CurTime);
 	}
 
@@ -616,7 +621,7 @@ int __stdcall main(HINSTANCE hInstance,
 			// TODO: Add code to detect whether a video is playing, and don't count watching videos as idle time.
 			// By not directly using LastInputInfo's time, only comparing to it, we prevent overflow problems for integers.
 			LASTINPUTINFO LastInputInfo = {sizeof(LASTINPUTINFO), 0};
-			assert(GetLastInputInfo(&LastInputInfo));
+			Assert(GetLastInputInfo(&LastInputInfo));
 			if(PrevLastInput != LastInputInfo.dwTime)
 			{
 				PrevLastInput = LastInputInfo.dwTime;
@@ -673,7 +678,7 @@ int __stdcall main(HINSTANCE hInstance,
 				GetSystemTime(&SysTimeNow);
 				SystemTimeToFileTime(&SysTimeNow, &FileTimeNow);
 				ui64 TimeRel2020 = ULARGE_INTEGER{FileTimeNow.dwLowDateTime, FileTimeNow.dwHighDateTime}.QuadPart - YearBegin2020;
-				TimeRel2020 /= SToFiletime;
+				TimeRel2020 /= SToFileTime;
 				ui64 CurTimeDiv = TimeRel2020 / TimeDivS;
 
 				persist ui64 TimeDivLast = CurTimeDiv;
@@ -715,10 +720,10 @@ int __stdcall main(HINSTANCE hInstance,
 #ifdef DEBUG
 				{
 					QueryPerformanceCounter(&ProcEnd);
-					assert(ProcBegin.QuadPart < ProcEnd.QuadPart);
+					Assert(ProcBegin.QuadPart < ProcEnd.QuadPart);
 					ui64 TimeSinceActSwitch = (ProcEnd.QuadPart - ProcBegin.QuadPart) / QueryFreq.QuadPart;
-					TimeSinceActSwitch /= SToFiletime;
-					assert(TimeSinceActSwitch <= TimeDivS);
+					TimeSinceActSwitch /= SToFileTime;
+					Assert(TimeSinceActSwitch <= TimeDivS);
 				}
 #endif
 
@@ -737,9 +742,9 @@ int __stdcall main(HINSTANCE hInstance,
 				ULARGE_INTEGER TimeNow{TimeNowFile.dwLowDateTime, TimeNowFile.dwHighDateTime};
 
 				ui64 TimeRem = TimeNow.QuadPart % (Sleep100NS);
-				assert(TimeRem < INT64_MAX);
-				i64 TimeCorrection = (((i64)TimeRem - (i64)TimePrecisionRem) / MSToFiletime);
-				i64 TotalTimeError = (i64)(TimeNow.QuadPart / MSToFiletime) - ((SysTime.QuadPart + LogIters++ * SleepMS * MSToFiletime) / MSToFiletime);
+				Assert(TimeRem < INT64_MAX);
+				i64 TimeCorrection = (((i64)TimeRem - (i64)TimePrecisionRem) / MSToFileTime);
+				i64 TotalTimeError = (i64)(TimeNow.QuadPart / MSToFileTime) - ((SysTime.QuadPart + LogIters++ * SleepMS * MSToFileTime) / MSToFileTime);
 
 				SYSTEMTIME ProfTime;
 				FileTimeToSystemTime(&TimeNowFile, &ProfTime);
@@ -747,7 +752,7 @@ int __stdcall main(HINSTANCE hInstance,
 				persist bool LastWasError = false;
 				if(TotalTimeError < SleepMS)
 				{
-					assert(abs(TimeCorrection) <= SleepMS);
+					Assert(abs(TimeCorrection) <= SleepMS);
 					Sleep(TruncAss(DWORD, SleepMS - TimeCorrection));
 					LastWasError = false;
 				}
@@ -763,15 +768,15 @@ int __stdcall main(HINSTANCE hInstance,
 
 	f64 TotalProgramTime = ((f64)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (f64)QueryFreq.QuadPart);
 	f64 TimeError = TotalProgramTime - AccumTimeMS;
-	assert(TimeError < 0.2f); // TODO: Fix time-precision problems (including ASSURE_TIME_PRECISION())
+	Assert(TimeError < 0.2f); // TODO: Fix time-precision problems (including ASSURE_TIME_PRECISION())
 
 #if WHAT_DO == DO_GRAPH
-	assert(WaitForSingleObject(ThreadHnd, 1000) != WAIT_TIMEOUT);
+	Assert(WaitForSingleObject(ThreadHnd, 1000) != WAIT_TIMEOUT);
 #endif
 
 #ifndef DEBUG
-	assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_READONLY));
-	assert(SetFileAttributes(SymFilename, FILE_ATTRIBUTE_READONLY));
+	Assert(SetFileAttributes(LogFilename, FILE_ATTRIBUTE_READONLY));
+	Assert(SetFileAttributes(SymFilename, FILE_ATTRIBUTE_READONLY));
 #endif
 
 	CloseHandle(LogFile);
@@ -784,6 +789,8 @@ typedef struct time_graph_data
 {
 	uint VAO, VBO, CalProg;
 	uint QuadVAO, FBProg;
+	ui64 Center, Zoom;
+	uint ScrollSensitivity;
 } time_graph_data;
 
 typedef struct win_data
@@ -814,6 +821,8 @@ void UpdateWindowSize(win_data &WD, HWND Wnd, WPARAM W, LPARAM L)
 		}
 	}
 }
+
+LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L);
 
 #define WM_USER_SHELLICON WM_USER + 1
 #define IDM_EXIT WM_USER + 2
@@ -875,6 +884,13 @@ LRESULT CALLBACK WndProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 		}
 		break;
 
+		case WM_KEYDOWN:
+		case WM_KEYUP:
+		case WM_SYSKEYDOWN:
+		case WM_SYSKEYUP:
+			Result = TimeMainGraphProc(Wnd, Msg, W, L);
+			break;
+
 		default:
 			Result = DefWindowProc(Wnd, Msg, W, L);
 	}
@@ -882,12 +898,10 @@ LRESULT CALLBACK WndProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 	return Result;
 }
 
-LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L);
-
 DWORD WINAPI NotifIconThread(void *Args)
 {
 	// TODO: Use manifest file instead, as msdn suggests (https://docs.microsoft.com/en-us/windows/win32/hidpi/setting-the-default-dpi-awareness-for-a-process)?
-	assert(SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2));
+	Assert(SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2));
 
 	HINSTANCE hInstance = (HINSTANCE)Args;
 
@@ -906,9 +920,9 @@ DWORD WINAPI NotifIconThread(void *Args)
 			WndClass.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
 			WndClass.style = CS_OWNDC;
 			WndClass.hbrBackground = CreateSolidBrush(WD.BGColor);
-			assert(RegisterClassEx(&WndClass));
+			Assert(RegisterClassEx(&WndClass));
 			Window = CreateWindow(WndClass.lpszClassName, L"timen", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, hInstance, 0);
-			assert(Window != INVALID_HANDLE_VALUE);
+			Assert(Window != INVALID_HANDLE_VALUE);
 			SetWindowLongPtr(Window, GWLP_USERDATA, (LONG_PTR)&WD);
 		}
 
@@ -918,9 +932,9 @@ DWORD WINAPI NotifIconThread(void *Args)
 			WndClass.hInstance = hInstance;
 			WndClass.lpszClassName = L"time graph";
 			WndClass.style = CS_OWNDC;
-			assert(RegisterClass(&WndClass));
+			Assert(RegisterClass(&WndClass));
 			TimeMainGraph = CreateWindow(WndClass.lpszClassName, L"time graph", WS_CHILD | WS_VISIBLE, 50, 50, CW_USEDEFAULT, CW_USEDEFAULT, Window, 0, hInstance, 0);
-			assert(TimeMainGraph != INVALID_HANDLE_VALUE);
+			Assert(TimeMainGraph != INVALID_HANDLE_VALUE);
 			SetWindowLongPtr(TimeMainGraph, GWLP_USERDATA, (LONG_PTR)&WD);
 			WD.TimeGraphWnd = TimeMainGraph;
 
@@ -937,7 +951,16 @@ DWORD WINAPI NotifIconThread(void *Args)
 		NotifIcon.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
 		NotifIcon.uCallbackMessage = WM_USER_SHELLICON;
 		wcscpy_s(NotifIcon.szTip, ArrLen(NotifIcon.szTip), L"timen");
-		assert(Shell_NotifyIcon(NIM_ADD, &NotifIcon));
+		Assert(Shell_NotifyIcon(NIM_ADD, &NotifIcon));
+	}
+
+	{
+		time_graph_data &GraphData = WD.TimeGraphData;
+		FILETIME FTNow;
+		GetSystemTimeAsFileTime(&FTNow);
+		GraphData.Center = 19655000; // (ULARGE_INTEGER{FTNow.dwLowDateTime, FTNow.dwHighDateTime}.QuadPart - YearBegin2020) / SToFileTime;
+		GraphData.Zoom = 6;
+		GraphData.ScrollSensitivity = 48;
 	}
 
 #ifdef DEBUG
@@ -1051,8 +1074,8 @@ ui64 CreateTimestamp(uint Year, uint Month = 0, uint Day = 0, uint Hour = 0, uin
 	LocalFileTimeToFileTime(&LocFileTime, &FileTime);
 
 	ui64 ResultTime = ULARGE_INTEGER{FileTime.dwLowDateTime, FileTime.dwHighDateTime}.QuadPart;
-	assert(ResultTime >= YearBegin2020);
-	return (ResultTime - YearBegin2020) / SToFiletime;
+	Assert(ResultTime >= YearBegin2020);
+	return (ResultTime - YearBegin2020) / SToFileTime;
 }
 
 ui32 GetProgramsCount()
@@ -1086,10 +1109,6 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 		}
 		break;
 
-		case WM_MOUSEWHEEL:
-			RedrawWindow(Wnd, 0, 0, RDW_INVALIDATE);
-			break;
-
 		// TODO: Test if DPICHANGED is handled correctly by using multiple monitors.
 		// TODO: Follow tutorial on https://docs.microsoft.com/en-us/windows/win32/hidpi/high-dpi-desktop-application-development-on-windows and https://github.com/tringi/win32-dpi
 		case WM_DPICHANGED:
@@ -1109,17 +1128,70 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 		}
 		break;
 
+		case WM_KEYUP:
+		case WM_KEYDOWN:
+		{
+			bool Down = (Msg == WM_KEYDOWN);
+			if(W == 'A' || W == 'D')
+			{
+				ui64 ScrollAmount = MIN(MAX(tgd.Zoom / tgd.ScrollSensitivity, 1) * TimeDivS, tgd.Center);
+				if(W == 'A')
+				{
+					tgd.Center -= ScrollAmount;
+				}
+				else if(W == 'D')
+				{
+					tgd.Center += ScrollAmount;
+				}
+				RedrawWindow(Wnd, 0, 0, RDW_INVALIDATE);
+			}
+		}
+		break;
+		case WM_MOUSEWHEEL:
+		{
+			i16 Scroll = GET_WHEEL_DELTA_WPARAM(W) / WHEEL_DELTA;
+			tgd.Zoom += Scroll;
+			tgd.Zoom = MAX(tgd.Zoom, 1);
+			RedrawWindow(Wnd, 0, 0, RDW_INVALIDATE);
+		}
+		break;
 		// TODO: Paint live while logging, if the window is active
 		// TODO: Refactor to unit test
 		// TODO: Go again over this whole mess
 		case WM_PAINT:
 		{
+#define PAINT_EXPECT_ASS(Expr) \
+	if(!(Expr))                  \
+	{                            \
+		UNDEFINED_CODE_PATH;       \
+		goto PaintFailure;         \
+	}                            \
+	0
+
+#define PAINT_EXPECT(Expr) \
+	if(!(Expr))              \
+	{                        \
+		goto PaintFailure;     \
+	}                        \
+	0
+
+			f64 *ActivityTimes = 0;
+			f32 *NormActTimes = 0;
+
+			PAINTSTRUCT PS;
+			HDC DC = BeginPaint(Wnd, &PS);
+
+			glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+			glDisable(GL_DEPTH);
+
 			// 8/10/2020 16 14 5   17 55 44
 			//ui64 StartDate = CreateTimestamp(2020, 8, 10, 15, 0, 5);
 			//ui64 EndDate = CreateTimestamp(2020, 8, 10, 17, 55, 44);
 
-			const ui64 StartDate = CreateTimestamp(2020, 8, 15, 10, 50, 20);
-			const ui64 EndDate = CreateTimestamp(2020, 8, 15, 13, 51, 20);
+			ui64 StartDate = MAX((i64)tgd.Center - (i64)(tgd.Zoom * TimeDivS), 0);
+			StartDate = (StartDate / TimeDivS) * TimeDivS;
+			ui64 EndDate = tgd.Center + tgd.Zoom * TimeDivS;
+			EndDate = (EndDate / TimeDivS + 1) * TimeDivS;
 
 			typedef struct stamp_info
 			{
@@ -1135,15 +1207,12 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 			ui64 StpFileSize;
 			char *StpBuf = (char *)LoadFileContents(StampFilename, &StpFileSize);
 			void *LogFile = OpenFile(LogFilename, FA_Read, FS_All);
-			// TODO: Show the whole time range, not only the bounding range of the valid balues!
+			// TODO: Show the whole time range, not only the bounding range of the valid values!
 			// Includes all timestamps in the requested range, but also the two timestamps before and after.
 			std::vector<stamp_info> RangeStamps;
 			{
-				if(StartDate >= EndDate)
-				{
-					UNHANDLED_CODE_PATH;
-					return 0;
-				}
+				PAINT_EXPECT_ASS(StartDate < EndDate);
+
 				char *FilePos = StpBuf;
 
 				ui64 LastStpDate = 0;
@@ -1155,14 +1224,14 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 					char *StpMarkerStr = strchr(FilePos, ' ') + 1;
 					ui64 StpMarker = strtoull(StpMarkerStr, 0, 10);
 
-					assert(LastStpMarker <= StpMarker);
-					assert(LastStpDate <= StpDate);
+					Assert(LastStpMarker <= StpMarker);
+					Assert(LastStpDate <= StpDate);
 
 					if(!FoundStart)
 					{
 						if(StpDate > StartDate)
 						{
-							assert(!LastStpDate || LastStpDate <= StartDate);
+							Assert(!LastStpDate || LastStpDate <= StartDate);
 							FoundStart = true;
 							IsStart = true;
 							FilePos++;
@@ -1211,7 +1280,7 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 				// If the time window is outside the given range, there should not be any stamps added.
 				if(!FoundStart)
 				{
-					assert(RangeStamps.size() == 0);
+					Assert(RangeStamps.size() == 0);
 				}
 				else if(!FoundEnd)
 				{
@@ -1221,37 +1290,41 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 						RangeStamps.push_back({LogFileSize, LastStpDate});
 					}
 				}
+
+				PAINT_EXPECT(RangeStamps.size());
 			}
 
-			ui32 TotalHours = (ui32)(EndDate / TimeDivS - StartDate / TimeDivS) + 1;
+			ui32 TotalHours = (ui32)(EndDate / TimeDivS - StartDate / TimeDivS);
+			TotalHours = MIN(TotalHours, 256);
 			// TODO: Instead of reserving memory for all programs, how about instead inserting to some type of map and allocating dynamically?
 			const ui32 TotalProgs = GetProgramsCount();
 
 			ui32 ActivityLen = TotalProgs * TotalHours;
-			f64 *ActivityTimes = (f64 *)malloc(ActivityLen * sizeof(f64));
+			ActivityTimes = (f64 *)malloc(ActivityLen * sizeof(f64));
 			memset(ActivityTimes, 0, ActivityLen * sizeof(f64));
 
+			ui64 StartMarker = RangeStamps.front().Marker, EndMarker = RangeStamps.back().Marker;
+			ui32 FileRangeSize = (ui32)(EndMarker - StartMarker);
+			PAINT_EXPECT(FileRangeSize > 0);
+
 			// Process the activities to make presentable data out of them.
-			if(RangeStamps.size())
 			{
 				// There must be at least two timestamps, since otherwise this doesn't represent a range.
-				assert(RangeStamps.size() >= 2);
+				Assert(RangeStamps.size() >= 2);
 
 				// Start date must be before the second stamp, since the stamp is included in the range (other way around for end date).
-				assert(StartDate <= RangeStamps[1].Time);
-				assert((RangeStamps.end() - 2)->Time <= EndDate);
+				Assert(StartDate <= RangeStamps[1].Time);
+				Assert((RangeStamps.end() - 2)->Time <= EndDate);
 
-				ui64 StartMarker = RangeStamps.front().Marker, EndMarker = RangeStamps.back().Marker;
-				ui32 FileRangeSize = (ui32)(EndMarker - StartMarker);
 				char *LogBuf;
 				{
 					LARGE_INTEGER FilePointer;
 					FilePointer.QuadPart = StartMarker;
-					assert(SetFilePointerEx(LogFile, FilePointer, 0, FILE_BEGIN) != INVALID_SET_FILE_POINTER);
+					Assert(SetFilePointerEx(LogFile, FilePointer, 0, FILE_BEGIN) != INVALID_SET_FILE_POINTER);
 					file_result FileResult;
 					LogBuf = (char *)ReadFileContents(LogFile, FileRangeSize, &FileResult);
 					CloseFile(LogFile);
-					assert(FileResult == file_result::Success);
+					Assert(FileResult == file_result::Success);
 				}
 
 				char *LogPos = LogBuf;
@@ -1269,25 +1342,27 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 				f32 ATime = 0;
 				// Move forward until we reach the date at which we want to start.
 				// TODO NOW: Is this necessary if we only allow hour granularity?
-				while(true)
-				{
-					TimeUntilStartDate -= (ui64)(ATime * SToFiletime);
-					if(TimeUntilStartDate <= 0)
-					{
-						if(TimeUntilStartDate < 0 && ATime)
-						{
-							uint AHIndex = ASym * TotalHours + CurHour;
-							ActivityTimes[AHIndex] += -TimeUntilStartDate;
-						}
-						break;
-					}
+				//while(true)
+				//{
+				//	TimeUntilStartDate -= (ui64)(ATime * SToFileTime);
+				//	if(TimeUntilStartDate <= 0)
+				//	{
+				//		if(TimeUntilStartDate < 0 && ATime)
+				//		{
+				//			uint AHIndex = ASym * TotalHours + CurHour;
+				//			ActivityTimes[AHIndex] += -TimeUntilStartDate;
+				//		}
+				//		break;
+				//	}
 
-					if(!(LogPos = ParseActivity(LogPos, &ASym, &ATime)))
-					{
-						UNHANDLED_CODE_PATH;
-						break;
-					}
-				}
+				//	char *NextPos;
+				//	if(!(NextPos = ParseActivity(LogPos, &ASym, &ATime)))
+				//	{
+				//		UNHANDLED_CODE_PATH;
+				//		break;
+				//	}
+				//	LogPos = NextPos;
+				//}
 
 				while(LogPos >= LogBuf && ((ptrdiff_t)LogPos - (ptrdiff_t)LogBuf) < FileRangeSize)
 				{
@@ -1319,9 +1394,9 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 					{
 						uint AHIndex = ASym * TotalHours + CurHour;
 						ActivityTimes[AHIndex] += ATime;
-						assert(AHIndex < ActivityLen);
+						Assert(AHIndex < ActivityLen);
 						// TODO FIX: Activity time is sometimes larger than division time (precision problem) [remove "+ 1.0f" after fix]. Possibly because time is updated (expanded) _before_ time division check.
-						//assert(ActivityTimes[AHIndex] <= TimeDivS + 1.0f);
+						//Assert(ActivityTimes[AHIndex] <= TimeDivS + 1.0f);
 					}
 				}
 			DataCollectionFinish:
@@ -1339,66 +1414,59 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 				{
 					AccumTime += ActivityTimes[p * TotalHours + h];
 				}
-				LargestTime = max(LargestTime, AccumTime);
+				LargestTime = MAX(LargestTime, AccumTime);
 			}
 
 			if(LargestTime < FLT_EPSILON)
-			{
-				assert(RangeStamps.size() == 0);
-			}
+				Assert(RangeStamps.size() == 0);
 			LargestTime = MIN(LargestTime, TimeDivS);
 
-			f32 *NormActTimes = (f32 *)malloc(ActivityLen * sizeof(f32));
+			NormActTimes = (f32 *)malloc(ActivityLen * sizeof(f32));
 			memset(NormActTimes, 0, ActivityLen * sizeof(f32));
 			for(size_t h = 0; h < TotalHours; h++)
 			{
 				for(size_t p = 0; p < TotalProgs; p++)
 				{
 					size_t Index = h * TotalProgs + p;
-					assert(Index < ActivityLen);
+					Assert(Index < ActivityLen);
 					NormActTimes[Index] = (f32)(ActivityTimes[p * TotalHours + h] / LargestTime * 2.0f - 1.0f);
 					if(p != 0)
-					{
 						NormActTimes[Index] += NormActTimes[Index - 1] + 1.0f;
-					}
+
+					NoAssert(NormActTimes[Index] <= 1.0f && NormActTimes[Index] >= -1.0f);
+					// TODO TEMP: Remove
+					NormActTimes[Index] = CLAMP(NormActTimes[Index], -1.0f, 1.0f);
 				}
 			}
-
-
-			PAINTSTRUCT PS;
-			HDC DC = BeginPaint(Wnd, &PS);
 
 			InitTimeGraphGL(tgd, TotalHours);
 
 			glBindFramebuffer(GL_FRAMEBUFFER, MSFrameBuf);
-			glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
-			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+			glClear(GL_COLOR_BUFFER_BIT);
 			glUseProgram(tgd.CalProg);
 			glBindVertexArray(tgd.VAO);
 
+			srand(1);
+			uint uColorLoc = glGetUniformLocation(tgd.CalProg, "uColor");
 			for(size_t p = 0; p < TotalProgs; p++)
 			{
-				// TODO: Space out all colors, also space them out from background and special colors (like black, magenta?).
-				// TODO: If an 'Other' section is added, make it light gray or some boring color.
+				// TODO FUTURE: Space out all colors, also space them out from background and special colors (like black, magenta?).
+				// TODO FUTURE: If an 'Other' section is added, make it light gray or some boring color.
 				f32 Color[3];
 				for(size_t i = 0; i < 3; i++)
 				{
 					Color[i] = (f32)rand() / RAND_MAX;
 				}
-				glUniform3fv(glGetUniformLocation(tgd.CalProg, "uColor"), 1, Color);
+				glUniform3fv(uColorLoc, 1, Color);
 
 				std::vector<v2> Points(TotalHours * 2);
 				for(size_t h = 0; h < TotalHours; h++)
 				{
 					f32 x = ((f32)h / (TotalHours - 1)) * 2.0f - 1.0f;
 					if(p != 0)
-					{
 						Points[2 * h] = {x, NormActTimes[h * TotalProgs + p - 1]};
-					}
 					else
-					{
 						Points[2 * h] = {x, -1.0f};
-					}
 					Points[2 * h + 1] = {x, NormActTimes[h * TotalProgs + p]};
 				}
 
@@ -1416,24 +1484,33 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 			glBlitFramebuffer(0, 0, ScreenWidth, ScreenHeight, 0, 0, ScreenWidth, ScreenHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
 			glBindFramebuffer(GL_FRAMEBUFFER, 0);
-			glClearColor(1.0f, 0.0f, 1.0f, 1.0f);
-			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+			glClear(GL_COLOR_BUFFER_BIT);
 
 			glUseProgram(tgd.FBProg);
 			glBindVertexArray(tgd.QuadVAO);
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, IntermTex);
 			glDrawArrays(GL_TRIANGLES, 0, 6);
-			SwapBuffers(DC);
 
-			EndPaint(Wnd, &PS);
+			goto PaintExit;
+			{
+			PaintFailure:
+				glBindFramebuffer(GL_FRAMEBUFFER, 0);
+				glClear(GL_COLOR_BUFFER_BIT);
+			}
+		PaintExit:
 
 			if(ActivityTimes)
-			{
 				free(ActivityTimes);
+			if(NormActTimes)
 				free(NormActTimes);
-			}
+
+			SwapBuffers(DC);
+			EndPaint(Wnd, &PS);
 			return 0;
+
+#undef PAINT_EXPECT
+#undef PAINT_EXPECT_ASS
 		}
 
 		default:
