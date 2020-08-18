@@ -1,11 +1,14 @@
 // TODO: Test program on integrated GPU
 /*
+	TODO: Calendar marks
+	TODO REFACTOR: Remove all 'Proc' names
+
 	TODO REFACTOR: Change all ambiguous integers to typedefs (e.g. filetime vs second timestamps)
 	TODO: Add emulation functions (QueryPerformanceCounter, GetActiveProgram, etc.) for faster debugging.
 	TODO: Use md5/sha/crc/other for file corruption prevention? (e.g. md5 of each region between two stamps)
 	TODO: Save timestamp in other occasions then only when the program starts again, for example when the system shuts down. 
 	TODO: Microsoft Edge window title is wrong when queried (weird symbols after 't', then "Edge).
-	TODO: Investigate this (bug or expected bevavior?:
+	TODO: Investigate this (bug or expected bevavior?: (old?)
 		React:  Adding invalid program time ('Unknown' for 0.001550s) to next program ('Hourly Interrupt').
 		React:  Adding invalid program time ('Unknown' for 0.100530s) to next program ('P:\C++\timen\build\timen.exe').
 */
@@ -30,6 +33,7 @@
 #include <atomic>
 #include <cwchar>
 #include <stdio.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
@@ -212,9 +216,19 @@ ProcessProcSym(proc_sym_table *Syms, const char *Str)
 	}
 }
 
+#define ParseLogTime(...) atof(__VA_ARGS__)
+#define P_TMIN PRIi64
+#define TMIN_MAX INT32_MAX
+
+typedef i64 t_min; // Minimum time unit (highest granularity) 
+typedef i64 t_min_d;
+typedef i64 t_div; // Time division (e.g. hour)
+typedef i64 t_div_d;
+typedef ui64 t_file; // Used by win32
+
 // TODO: Remove these variables once time-precision debugging is finished.
 global LARGE_INTEGER WholeProgramBegin = {}, WholeProgramEnd = {};
-global f64 AccumTimeMS = 0.0f;
+global t_min AccumTimeS = 0;
 
 // Describes the action that this program has taken in a loop pass
 enum activity_type
@@ -294,7 +308,7 @@ activity_info &activity_info::operator=(activity_info &B)
 	return A;
 }
 
-char *ParseActivity(char *Str, i32 *ActSym, f32 *Time)
+char *ParseActivity(char *Str, i32 *ActSym, t_min *Time)
 {
 #define NEXT_EOL()               \
 	if(!(Str = AfterNextEOL(Str))) \
@@ -307,8 +321,7 @@ char *ParseActivity(char *Str, i32 *ActSym, f32 *Time)
 	*ActSym = atoi(Str);
 	NEXT_EOL();
 	NEXT_EOL();
-	*Time = (f32)atof(Str);
-	Assert(*Time > 0.0);
+	*Time = (t_min)ParseLogTime(Str);
 	// Assert(ATime > MinProgramTime);
 	NEXT_EOL();
 	NEXT_EOL();
@@ -326,8 +339,8 @@ LogActivity(HANDLE File, proc_sym_table &Symbols,
 	Assert(strcmp(Title, NextTitle) != 0);
 
 	// Note: The program time can be negative if the user became idle before the program started, so we need to check for that...
-	f64 fProcTime = ((f64)(TimeEnd.QuadPart - TimeBegin.QuadPart) / (f64)QueryFreq.QuadPart);
-	if(ActivityIsLoggable(ActivityType) && fProcTime > 0)
+	t_min ProcTime = ((t_min)(TimeEnd.QuadPart - TimeBegin.QuadPart) / (t_min)QueryFreq.QuadPart);
+	if(ActivityIsLoggable(ActivityType) && ProcTime > 0)
 	{
 		i32 ProcSymValue = -1;
 		if(ActivityType != AT_Idle)
@@ -350,8 +363,8 @@ LogActivity(HANDLE File, proc_sym_table &Symbols,
 			{
 				Title[1000] = '\0';
 			}
-			sprintf_s(LogBuffer, "%s%s%i%s%s%s%f%s%s", Title, EOLStr, ProcSymValue, EOLStr, Info, EOLStr, fProcTime, EOLStr, EOLStr);
-			Log(0x02, "Logging '%s' for %fs\n", Title, fProcTime);
+			sprintf_s(LogBuffer, "%s%s%i%s%s%s%" P_TMIN "%s%s", Title, EOLStr, ProcSymValue, EOLStr, Info, EOLStr, ProcTime, EOLStr, EOLStr);
+			Log(0x02, "Logging '%s' for %" P_TMIN "s\n", Title, ProcTime);
 			i32 LogLen = (i32)strlen(LogBuffer);
 
 			DWORD BytesWritten;
@@ -362,29 +375,29 @@ LogActivity(HANDLE File, proc_sym_table &Symbols,
 #ifdef DEBUG
 		// Assert that there are no time leaks (no 'lost' seconds) and that conservation of time is correct.
 		// Idle time is an exception, since we might later 'reclaim' time as idle, which would make the assertion temporarily a false positive.
-		AccumTimeMS += fProcTime;
+		AccumTimeS += ProcTime;
 		if(NextActivityType != AT_Idle)
 		{
 			QueryPerformanceCounter(&WholeProgramEnd);
-			f64 TotalProgramTime = ((f64)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (f64)QueryFreq.QuadPart);
-			f64 TimeError = fabs(TotalProgramTime - AccumTimeMS);
+			t_min TotalProgramTime = ((t_min)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (t_min)QueryFreq.QuadPart);
+			t_min TimeError = abs(TotalProgramTime - AccumTimeS);
 			if(TimeError >= 0.2f)
 			{
-				printf("TIME ERROR: %f (%f not %f)\n", TimeError, AccumTimeMS, TotalProgramTime);
+				printf("TIME ERROR: %" P_TMIN " (%" P_TMIN " not %" P_TMIN ")\n", TimeError, AccumTimeS, TotalProgramTime);
 				UNDEFINED_CODE_PATH;
 			}
 			else
 			{
-				printf("Time Precision: %f (%f not %f)\n", TimeError, AccumTimeMS, TotalProgramTime);
+				printf("Time Precision: %" P_TMIN " (%" P_TMIN " not %" P_TMIN ")\n", TimeError, AccumTimeS, TotalProgramTime);
 			}
 		}
 #endif
 	}
-	else if(fProcTime <= 0 || !ActivityIsLoggable(ActivityType))
+	else if(ProcTime <= 0 || !ActivityIsLoggable(ActivityType))
 	{
 		// If the current activity is somehow invalid, add the time to the next activity.
-		NextTimeBegin.QuadPart -= (ui64)(fProcTime * QueryFreq.QuadPart);
-		Log(0x04, "Adding invalid program time ('%s' for %fs) to next program ('%s').\n", Title, fProcTime, NextTitle);
+		NextTimeBegin.QuadPart -= (ui64)(ProcTime * QueryFreq.QuadPart);
+		Log(0x04, "Adding invalid program time ('%s' for %" P_TMIN "s) to next program ('%s').\n", Title, ProcTime, NextTitle);
 	}
 }
 
@@ -439,8 +452,7 @@ std::atomic_bool Running = true;
 DWORD WINAPI NotifIconThread(void *Args);
 
 // Windows FileTime is in 100 nanoseconds intervals
-const i64 MSToFileTime = 10000;
-const i64 SToFileTime = 10000000;
+const t_min TMinToTFile = 10000000;
 
 const char *LogFilename = "Log.txt";
 const char *SymFilename = "Log.sym";
@@ -463,13 +475,13 @@ ui64 GetYear2020()
 	return YearBegin2020L.QuadPart;
 }
 
-const ui64 YearBegin2020 = GetYear2020();
-const ui32 TimeDivS = 100;
-void StampToTimeStr(char *Buf, size_t BufLen, ui64 TimeS)
+const t_file YearBegin2020 = GetYear2020();
+const t_min TimeDivS = 100;
+void StampToTimeStr(char *Buf, size_t BufLen, t_min Time)
 {
 	SYSTEMTIME SysTime;
 	ULARGE_INTEGER Time64;
-	Time64.QuadPart = TimeS * SToFileTime + YearBegin2020;
+	Time64.QuadPart = Time * TMinToTFile + YearBegin2020;
 	FILETIME FileTime, LocalFileTime;
 	FileTime.dwLowDateTime = Time64.LowPart;
 	FileTime.dwHighDateTime = Time64.HighPart;
@@ -479,14 +491,14 @@ void StampToTimeStr(char *Buf, size_t BufLen, ui64 TimeS)
 															SysTime.wMonth, SysTime.wDay, SysTime.wYear, SysTime.wHour, SysTime.wMinute, SysTime.wSecond);
 }
 
-void AddStamp(HANDLE LogFile, HANDLE StampFile, ui64 TimeS)
+void AddStamp(HANDLE LogFile, HANDLE StampFile, t_min Time)
 {
 	char TimeDivBuf[255], StampBuf[255];
 	LARGE_INTEGER LastActivityEnd;
 	Assert(GetFileSizeEx(LogFile, &LastActivityEnd));
 #ifdef DEBUG
-	StampToTimeStr(StampBuf, ArrLen(StampBuf), TimeS);
-	ui32 TimeDivLen = sprintf_s(TimeDivBuf, "%llu %llu [%s]%s", TimeS, LastActivityEnd.QuadPart, StampBuf, EOLStr);
+	StampToTimeStr(StampBuf, ArrLen(StampBuf), Time);
+	ui32 TimeDivLen = sprintf_s(TimeDivBuf, "%llu %llu [%s]%s", Time, LastActivityEnd.QuadPart, StampBuf, EOLStr);
 #else
 	ui32 TimeDivLen = sprintf_s(TimeDivBuf, "%llu %llu%s", Time, LastActivityEnd.QuadPart, EOLStr);
 #endif
@@ -581,17 +593,17 @@ int __stdcall main(HINSTANCE hInstance,
 
 	// TODO: Switch to second granularity once finished debugging.
 	// TODO: Also log seconds, not milliseconds.
-	const i32 SleepMS = 100;
-	const ui32 InactivityThreshMS = UINT32_MAX; //20000;
+	const t_min SleepS = 1;
+	const t_min InactivityThreshS = UINT32_MAX; //20000;
 
-	ui32 Sleep100NS = SleepMS * MSToFileTime;
+	t_min Sleep100NS = SleepS * TMinToTFile;
 
 	FILETIME SysTimeFile;
 	GetSystemTimeAsFileTime(&SysTimeFile);
 	ULARGE_INTEGER SysTime = ULARGE_INTEGER{SysTimeFile.dwLowDateTime, SysTimeFile.dwHighDateTime};
 
 	// Calculates the time remainder the timer should adhere to. See Sleep() below for further explanations.
-	ui64 TimePrecisionRem = SysTime.QuadPart % (Sleep100NS);
+	t_min TimePrecisionRem = SysTime.QuadPart % (Sleep100NS);
 	ui64 LogIters = 0;
 
 	LARGE_INTEGER QueryFreq;
@@ -604,7 +616,7 @@ int __stdcall main(HINSTANCE hInstance,
 		FILETIME FileTimeNow;
 		GetSystemTime(&SysTimeNow);
 		SystemTimeToFileTime(&SysTimeNow, &FileTimeNow);
-		ui64 CurTime = (ULARGE_INTEGER{FileTimeNow.dwLowDateTime, FileTimeNow.dwHighDateTime}.QuadPart - YearBegin2020) / SToFileTime;
+		t_min CurTime = (ULARGE_INTEGER{FileTimeNow.dwLowDateTime, FileTimeNow.dwHighDateTime}.QuadPart - YearBegin2020) / TMinToTFile;
 		AddStamp(LogFile, StampFile, CurTime);
 	}
 
@@ -615,7 +627,7 @@ int __stdcall main(HINSTANCE hInstance,
 	while(Running)
 	{
 		activity_info NextA = {};
-		persist ui64 IdleTime = 0;
+		persist t_min IdleTime = 0;
 		{
 			persist DWORD PrevLastInput = 0;
 			// TODO: Add code to detect whether a video is playing, and don't count watching videos as idle time.
@@ -627,9 +639,9 @@ int __stdcall main(HINSTANCE hInstance,
 				PrevLastInput = LastInputInfo.dwTime;
 				IdleTime = 0;
 			}
-			IdleTime += SleepMS;
+			IdleTime += SleepS;
 
-			if(IdleTime >= InactivityThreshMS)
+			if(IdleTime >= InactivityThreshS)
 			{
 				NextA.Type = AT_Idle;
 			}
@@ -655,7 +667,7 @@ int __stdcall main(HINSTANCE hInstance,
 			*/
 			if(NextA.Type == AT_Idle)
 			{
-				ui64 AddedIdleTime = IdleTime * QueryFreq.QuadPart / 1000;
+				t_min AddedIdleTime = IdleTime * QueryFreq.QuadPart;
 				ProcEnd.QuadPart -= AddedIdleTime;
 				NextProcBegin.QuadPart -= AddedIdleTime;
 			}
@@ -678,10 +690,10 @@ int __stdcall main(HINSTANCE hInstance,
 				GetSystemTime(&SysTimeNow);
 				SystemTimeToFileTime(&SysTimeNow, &FileTimeNow);
 				ui64 TimeRel2020 = ULARGE_INTEGER{FileTimeNow.dwLowDateTime, FileTimeNow.dwHighDateTime}.QuadPart - YearBegin2020;
-				TimeRel2020 /= SToFileTime;
-				ui64 CurTimeDiv = TimeRel2020 / TimeDivS;
+				TimeRel2020 /= TMinToTFile;
+				t_div CurTimeDiv = TimeRel2020 / TimeDivS;
 
-				persist ui64 TimeDivLast = CurTimeDiv;
+				persist t_div TimeDivLast = CurTimeDiv;
 				/*
 					Since we want to know at what activity a time division started, it's easiest if an activity
 					starts exactly at that the time division switch. That's why, if an activity goes over from
@@ -721,8 +733,8 @@ int __stdcall main(HINSTANCE hInstance,
 				{
 					QueryPerformanceCounter(&ProcEnd);
 					Assert(ProcBegin.QuadPart < ProcEnd.QuadPart);
-					ui64 TimeSinceActSwitch = (ProcEnd.QuadPart - ProcBegin.QuadPart) / QueryFreq.QuadPart;
-					TimeSinceActSwitch /= SToFileTime;
+					t_min TimeSinceActSwitch = (ProcEnd.QuadPart - ProcBegin.QuadPart) / QueryFreq.QuadPart;
+					TimeSinceActSwitch /= TMinToTFile;
 					Assert(TimeSinceActSwitch <= TimeDivS);
 				}
 #endif
@@ -741,23 +753,21 @@ int __stdcall main(HINSTANCE hInstance,
 				GetSystemTimeAsFileTime(&TimeNowFile);
 				ULARGE_INTEGER TimeNow{TimeNowFile.dwLowDateTime, TimeNowFile.dwHighDateTime};
 
-				ui64 TimeRem = TimeNow.QuadPart % (Sleep100NS);
-				Assert(TimeRem < INT64_MAX);
-				i64 TimeCorrection = (((i64)TimeRem - (i64)TimePrecisionRem) / MSToFileTime);
-				i64 TotalTimeError = (i64)(TimeNow.QuadPart / MSToFileTime) - ((SysTime.QuadPart + LogIters++ * SleepMS * MSToFileTime) / MSToFileTime);
-
-				SYSTEMTIME ProfTime;
-				FileTimeToSystemTime(&TimeNowFile, &ProfTime);
+				t_min TimeRem = TimeNow.QuadPart % Sleep100NS;
+				Assert(TimeRem < TMIN_MAX);
+				t_min_d TimeCorrection = ((t_min_d)(TimeRem - TimePrecisionRem) / TMinToTFile);
+				t_min_d TotalTimeError = (t_min_d)(TimeNow.QuadPart / TMinToTFile) - ((SysTime.QuadPart + LogIters++ * SleepS * TMinToTFile) / TMinToTFile);
 
 				persist bool LastWasError = false;
-				if(TotalTimeError < SleepMS)
+				if(TotalTimeError < SleepS)
 				{
-					Assert(abs(TimeCorrection) <= SleepMS);
-					Sleep(TruncAss(DWORD, SleepMS - TimeCorrection));
+					Assert(abs(TimeCorrection) <= SleepS);
+					Sleep(TruncAss(DWORD, SleepS - TimeCorrection) * 1000);
 					LastWasError = false;
 				}
 				else
 				{
+					// TODO TEMP: Remove
 					//UNHANDLED_CODE_PATH;
 					int x = 0;
 					x = x;
@@ -766,9 +776,9 @@ int __stdcall main(HINSTANCE hInstance,
 		}
 	}
 
-	f64 TotalProgramTime = ((f64)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (f64)QueryFreq.QuadPart);
-	f64 TimeError = TotalProgramTime - AccumTimeMS;
-	Assert(TimeError < 0.2f); // TODO: Fix time-precision problems (including ASSURE_TIME_PRECISION())
+	t_min TotalProgramTime = ((t_min)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (t_min)QueryFreq.QuadPart);
+	t_min_d TimeError = TotalProgramTime - AccumTimeS;
+	Assert(abs(TimeError) < 0.2f); // TODO: Fix time-precision problems (including ASSURE_TIME_PRECISION())
 
 #if WHAT_DO == DO_GRAPH
 	Assert(WaitForSingleObject(ThreadHnd, 1000) != WAIT_TIMEOUT);
@@ -789,7 +799,8 @@ typedef struct time_graph_data
 {
 	uint VAO, VBO, CalProg;
 	uint QuadVAO, FBProg;
-	ui64 Center, Zoom;
+	t_min Center;
+	ui64 Zoom;
 	uint ScrollSensitivity;
 } time_graph_data;
 
@@ -958,7 +969,8 @@ DWORD WINAPI NotifIconThread(void *Args)
 		time_graph_data &GraphData = WD.TimeGraphData;
 		FILETIME FTNow;
 		GetSystemTimeAsFileTime(&FTNow);
-		GraphData.Center = 19655000; // (ULARGE_INTEGER{FTNow.dwLowDateTime, FTNow.dwHighDateTime}.QuadPart - YearBegin2020) / SToFileTime;
+		// TODO FIX: At large zoom values, scrolling out makes everything go right instead of expand equally in both directions.
+		GraphData.Center = 19655000; // (ULARGE_INTEGER{FTNow.dwLowDateTime, FTNow.dwHighDateTime}.QuadPart - YearBegin2020) / TMinToTFile;
 		GraphData.Zoom = 6;
 		GraphData.ScrollSensitivity = 48;
 	}
@@ -986,7 +998,7 @@ DWORD WINAPI NotifIconThread(void *Args)
 #include "gl_graphics.cpp"
 
 // TODO FIX: Memory leak?
-void InitTimeGraphGL(time_graph_data &tgd, uint Hours)
+void InitTimeGraphGL(time_graph_data &tgd, t_div Hours)
 {
 	if(tgd.VAO)
 	{
@@ -1056,7 +1068,7 @@ void InitTimeGraphGL(time_graph_data &tgd, uint Hours)
 	}
 }
 
-ui64 CreateTimestamp(uint Year, uint Month = 0, uint Day = 0, uint Hour = 0, uint Minute = 0, uint Second = 0)
+t_min CreateTimestamp(uint Year, uint Month = 0, uint Day = 0, uint Hour = 0, uint Minute = 0, uint Second = 0)
 {
 	SYSTEMTIME SysTime = {};
 	SysTime.wYear = (WORD)Year;
@@ -1073,9 +1085,9 @@ ui64 CreateTimestamp(uint Year, uint Month = 0, uint Day = 0, uint Hour = 0, uin
 	LocalSystemTimeToLocalFileTime(&TimeZone, &SysTime, &LocFileTime);
 	LocalFileTimeToFileTime(&LocFileTime, &FileTime);
 
-	ui64 ResultTime = ULARGE_INTEGER{FileTime.dwLowDateTime, FileTime.dwHighDateTime}.QuadPart;
-	Assert(ResultTime >= YearBegin2020);
-	return (ResultTime - YearBegin2020) / SToFileTime;
+	t_min ResultTime = ULARGE_INTEGER{FileTime.dwLowDateTime, FileTime.dwHighDateTime}.QuadPart;
+	Assert((t_file)ResultTime >= YearBegin2020);
+	return (ResultTime - YearBegin2020) / TMinToTFile;
 }
 
 ui32 GetProgramsCount()
@@ -1134,7 +1146,7 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 			bool Down = (Msg == WM_KEYDOWN);
 			if(W == 'A' || W == 'D')
 			{
-				ui64 ScrollAmount = MIN(MAX(tgd.Zoom / tgd.ScrollSensitivity, 1) * TimeDivS, tgd.Center);
+				ui64 ScrollAmount = MIN(MAX(tgd.Zoom / tgd.ScrollSensitivity, 1) * TimeDivS, (ui64)tgd.Center);
 				if(W == 'A')
 				{
 					tgd.Center -= ScrollAmount;
@@ -1150,7 +1162,7 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 		case WM_MOUSEWHEEL:
 		{
 			i16 Scroll = GET_WHEEL_DELTA_WPARAM(W) / WHEEL_DELTA;
-			tgd.Zoom += Scroll;
+			tgd.Zoom -= Scroll;
 			tgd.Zoom = MAX(tgd.Zoom, 1);
 			RedrawWindow(Wnd, 0, 0, RDW_INVALIDATE);
 		}
@@ -1175,7 +1187,7 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 	}                        \
 	0
 
-			f64 *ActivityTimes = 0;
+			t_min *ActivityTimes = 0;
 			f32 *NormActTimes = 0;
 
 			PAINTSTRUCT PS;
@@ -1188,9 +1200,9 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 			//ui64 StartDate = CreateTimestamp(2020, 8, 10, 15, 0, 5);
 			//ui64 EndDate = CreateTimestamp(2020, 8, 10, 17, 55, 44);
 
-			ui64 StartDate = MAX((i64)tgd.Center - (i64)(tgd.Zoom * TimeDivS), 0);
+			t_min StartDate = MAX((t_min_d)tgd.Center - (t_min_d)(tgd.Zoom * TimeDivS), 0);
 			StartDate = (StartDate / TimeDivS) * TimeDivS;
-			ui64 EndDate = tgd.Center + tgd.Zoom * TimeDivS;
+			t_min EndDate = tgd.Center + tgd.Zoom * TimeDivS;
 			EndDate = (EndDate / TimeDivS + 1) * TimeDivS;
 
 			typedef struct stamp_info
@@ -1198,7 +1210,7 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 				// The marker which points to an activity in the main log file.
 				ui64 Marker;
 				// The time at which that activity started.
-				ui64 Time;
+				t_min Time;
 			} stamp_info;
 
 			// Find the range of the file where the activities to collect are.
@@ -1215,12 +1227,12 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 
 				char *FilePos = StpBuf;
 
-				ui64 LastStpDate = 0;
+				t_min LastStpDate = 0;
 				ui64 LastStpMarker = 0;
 				ui64 LogFileSize = GetFileSize32(LogFile);
 				while((ui64)(FilePos - StpBuf) < StpFileSize)
 				{
-					ui64 StpDate = strtoull(FilePos, &FilePos, 10);
+					t_min StpDate = strtoull(FilePos, &FilePos, 10);
 					char *StpMarkerStr = strchr(FilePos, ' ') + 1;
 					ui64 StpMarker = strtoull(StpMarkerStr, 0, 10);
 
@@ -1294,14 +1306,14 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 				PAINT_EXPECT(RangeStamps.size());
 			}
 
-			ui32 TotalHours = (ui32)(EndDate / TimeDivS - StartDate / TimeDivS);
+			t_div TotalHours = (t_div)(EndDate / TimeDivS - StartDate / TimeDivS);
 			TotalHours = MIN(TotalHours, 256);
 			// TODO: Instead of reserving memory for all programs, how about instead inserting to some type of map and allocating dynamically?
 			const ui32 TotalProgs = GetProgramsCount();
 
-			ui32 ActivityLen = TotalProgs * TotalHours;
-			ActivityTimes = (f64 *)malloc(ActivityLen * sizeof(f64));
-			memset(ActivityTimes, 0, ActivityLen * sizeof(f64));
+			uint ActivityLen = (uint)(TotalProgs * TotalHours);
+			ActivityTimes = (t_min *)malloc(ActivityLen * sizeof(t_min));
+			memset(ActivityTimes, 0, ActivityLen * sizeof(t_min));
 
 			ui64 StartMarker = RangeStamps.front().Marker, EndMarker = RangeStamps.back().Marker;
 			ui32 FileRangeSize = (ui32)(EndMarker - StartMarker);
@@ -1330,21 +1342,19 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 				char *LogPos = LogBuf;
 				i32 NextStp = 0;
 				stamp_info NextStpInfo = RangeStamps[NextStp];
-				// TODO REFACTOR: Remove duplicate expression
-				ui32 CurHour = 0;
+				t_div CurHour = 0;
 
-				i64 TimeUntilStartDate = (StartDate - RangeStamps.front().Time);
-				// TODO NOW: End at the end of date, not at end of last stamp, as is currently done.
+				t_min_d TimeUntilStartDate = (StartDate - RangeStamps.front().Time);
 				// TODO NOW: Is this necessary if we only allow hour granularity?
-				i64 TimeUntilEndDate = (RangeStamps.back().Time - EndDate);
+				t_min_d TimeUntilEndDate = (RangeStamps.back().Time - EndDate);
 
 				i32 ASym = INT32_MAX;
-				f32 ATime = 0;
+				t_min ATime = 0;
 				// Move forward until we reach the date at which we want to start.
 				// TODO NOW: Is this necessary if we only allow hour granularity?
 				//while(true)
 				//{
-				//	TimeUntilStartDate -= (ui64)(ATime * SToFileTime);
+				//	TimeUntilStartDate -= (ui64)(ATime * TMinToTFile);
 				//	if(TimeUntilStartDate <= 0)
 				//	{
 				//		if(TimeUntilStartDate < 0 && ATime)
@@ -1369,7 +1379,7 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 					while(NextStpInfo.Marker <= (StartMarker + (LogPos - LogBuf)))
 					{
 						// TODO: This assumes that TimeDivS is the same as when this was recorded? Is that ok?
-						CurHour = (ui32)((NextStpInfo.Time) / TimeDivS - StartDate / TimeDivS);
+						CurHour = (t_div)((NextStpInfo.Time) / TimeDivS - StartDate / TimeDivS);
 						NextStp++;
 						if(NextStp == RangeStamps.size())
 						{
@@ -1392,11 +1402,13 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 
 					if((ui32)ASym < TotalProgs)
 					{
-						uint AHIndex = ASym * TotalHours + CurHour;
+						uint AHIndex = (uint)(ASym * TotalHours + CurHour);
 						ActivityTimes[AHIndex] += ATime;
 						Assert(AHIndex < ActivityLen);
 						// TODO FIX: Activity time is sometimes larger than division time (precision problem) [remove "+ 1.0f" after fix]. Possibly because time is updated (expanded) _before_ time division check.
-						//Assert(ActivityTimes[AHIndex] <= TimeDivS + 1.0f);
+						NoAssert(ActivityTimes[AHIndex] <= TimeDivS + 1.0f);
+						// TODO TEMP: Remove
+						ActivityTimes[AHIndex] = MIN(ActivityTimes[AHIndex], TimeDivS + 1);
 					}
 				}
 			DataCollectionFinish:
@@ -1406,11 +1418,12 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 			FreeFileContents(StpBuf);
 
 			// Find the largest spike in the graph for normalization.
+			// TODO NOW: TO t_min!!!!!!!
 			f64 LargestTime = 0;
-			for(size_t h = 0; h < TotalHours; h++)
+			for(uint h = 0; h < (uint)TotalHours; h++)
 			{
 				f64 AccumTime = 0;
-				for(size_t p = 0; p < TotalProgs; p++)
+				for(uint p = 0; p < TotalProgs; p++)
 				{
 					AccumTime += ActivityTimes[p * TotalHours + h];
 				}
@@ -1423,11 +1436,11 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 
 			NormActTimes = (f32 *)malloc(ActivityLen * sizeof(f32));
 			memset(NormActTimes, 0, ActivityLen * sizeof(f32));
-			for(size_t h = 0; h < TotalHours; h++)
+			for(uint h = 0; h < (uint)TotalHours; h++)
 			{
-				for(size_t p = 0; p < TotalProgs; p++)
+				for(uint p = 0; p < TotalProgs; p++)
 				{
-					size_t Index = h * TotalProgs + p;
+					uint Index = h * TotalProgs + p;
 					Assert(Index < ActivityLen);
 					NormActTimes[Index] = (f32)(ActivityTimes[p * TotalHours + h] / LargestTime * 2.0f - 1.0f);
 					if(p != 0)
@@ -1460,7 +1473,7 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 				glUniform3fv(uColorLoc, 1, Color);
 
 				std::vector<v2> Points(TotalHours * 2);
-				for(size_t h = 0; h < TotalHours; h++)
+				for(uint h = 0; h < (uint)TotalHours; h++)
 				{
 					f32 x = ((f32)h / (TotalHours - 1)) * 2.0f - 1.0f;
 					if(p != 0)
@@ -1472,7 +1485,7 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 
 				glBindBuffer(GL_ARRAY_BUFFER, tgd.VBO);
 				glBufferData(GL_ARRAY_BUFFER, sizeof(v2) * TotalHours * 2, &Points[0], GL_STATIC_DRAW);
-				glDrawArrays(GL_TRIANGLE_STRIP, 0, TotalHours * 2);
+				glDrawArrays(GL_TRIANGLE_STRIP, 0, (uint)TotalHours * 2);
 			}
 
 			RECT ClientRect;
