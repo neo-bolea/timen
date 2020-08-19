@@ -217,18 +217,22 @@ ProcessProcSym(proc_sym_table *Syms, const char *Str)
 }
 
 #define ParseLogTime(...) atof(__VA_ARGS__)
+#define ParseByteMarker(Str) strtoull(Str, 0, 10)
 #define P_TMIN PRIi64
 #define TMIN_MAX INT32_MAX
 
-typedef i64 t_min; // Minimum time unit (highest granularity) 
+typedef i64 t_min; // Minimum time unit (highest granularity)
 typedef i64 t_min_d;
 typedef i64 t_div; // Time division (e.g. hour)
 typedef i64 t_div_d;
 typedef ui64 t_file; // Used by win32
 
+typedef ui64 byte_mark;
+
 // TODO: Remove these variables once time-precision debugging is finished.
-global LARGE_INTEGER WholeProgramBegin = {}, WholeProgramEnd = {};
+global t_file WholeProgramBegin = {}, WholeProgramEnd = {};
 global t_min AccumTimeS = 0;
+global uint TimeErrorCount = 0;
 
 // Describes the action that this program has taken in a loop pass
 enum activity_type
@@ -334,12 +338,12 @@ internal void
 LogActivity(HANDLE File, proc_sym_table &Symbols,
 						char *Title, char *NextTitle, char *ProcessName, const char *Info,
 						activity_type ActivityType, activity_type NextActivityType,
-						LARGE_INTEGER TimeBegin, LARGE_INTEGER TimeEnd, LARGE_INTEGER &NextTimeBegin, LARGE_INTEGER QueryFreq)
+						t_file TimeBegin, t_file TimeEnd, t_file &NextTimeBegin, t_file QueryFreq)
 {
 	Assert(strcmp(Title, NextTitle) != 0);
 
 	// Note: The program time can be negative if the user became idle before the program started, so we need to check for that...
-	t_min ProcTime = ((t_min)(TimeEnd.QuadPart - TimeBegin.QuadPart) / (t_min)QueryFreq.QuadPart);
+	t_min ProcTime = ((t_min)(TimeEnd - TimeBegin) / (t_min)QueryFreq);
 	if(ActivityIsLoggable(ActivityType) && ProcTime > 0)
 	{
 		i32 ProcSymValue = -1;
@@ -378,17 +382,17 @@ LogActivity(HANDLE File, proc_sym_table &Symbols,
 		AccumTimeS += ProcTime;
 		if(NextActivityType != AT_Idle)
 		{
-			QueryPerformanceCounter(&WholeProgramEnd);
-			t_min TotalProgramTime = ((t_min)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (t_min)QueryFreq.QuadPart);
+			QueryPerformanceCounter((LARGE_INTEGER *)&WholeProgramEnd);
+			t_min TotalProgramTime = ((t_min)(WholeProgramEnd - WholeProgramBegin) / (t_min)QueryFreq);
 			t_min TimeError = abs(TotalProgramTime - AccumTimeS);
 			if(TimeError >= 0.2f)
 			{
-				printf("TIME ERROR: %" P_TMIN " (%" P_TMIN " not %" P_TMIN ")\n", TimeError, AccumTimeS, TotalProgramTime);
-				UNDEFINED_CODE_PATH;
+				Log(0x4c, "TIME ERROR: %" P_TMIN " (%" P_TMIN " not %" P_TMIN ")\n", TimeError, AccumTimeS, TotalProgramTime);
+				TimeErrorCount++;
 			}
 			else
 			{
-				printf("Time Precision: %" P_TMIN " (%" P_TMIN " not %" P_TMIN ")\n", TimeError, AccumTimeS, TotalProgramTime);
+				Log("Time Precision: %" P_TMIN " (%" P_TMIN " not %" P_TMIN ")\n", TimeError, AccumTimeS, TotalProgramTime);
 			}
 		}
 #endif
@@ -396,10 +400,16 @@ LogActivity(HANDLE File, proc_sym_table &Symbols,
 	else if(ProcTime <= 0 || !ActivityIsLoggable(ActivityType))
 	{
 		// If the current activity is somehow invalid, add the time to the next activity.
-		NextTimeBegin.QuadPart -= (ui64)(ProcTime * QueryFreq.QuadPart);
+		NextTimeBegin -= (ui64)(ProcTime * QueryFreq);
 		Log(0x04, "Adding invalid program time ('%s' for %" P_TMIN "s) to next program ('%s').\n", Title, ProcTime, NextTitle);
 	}
 }
+
+// TODO: Remove this macro once time-precision debugging is finished.
+#ifdef DEBUG
+global f64 AccumTimeMS = 0.0f;
+#endif
+
 
 internal bool
 GetActiveProgramInfo(activity_info &Info)
@@ -461,7 +471,7 @@ const wchar_t *LogFilenameW = L"Log.txt";
 const wchar_t *SymFilenameW = L"Log.sym";
 const wchar_t *StampFilenameW = L"Log.stp";
 
-ui64 GetYear2020()
+t_file GetYear2020()
 {
 	LARGE_INTEGER YearBegin2020L;
 	FILETIME FileTime2020;
@@ -524,6 +534,8 @@ int __stdcall main(HINSTANCE hInstance,
 #ifdef DEBUG
 	DebugConsole = GetStdHandle(STD_OUTPUT_HANDLE);
 #endif
+
+	CoInitialize(0);
 
 #if WHAT_DO == DO_GRAPH
 	DWORD ThreadID;
@@ -606,9 +618,9 @@ int __stdcall main(HINSTANCE hInstance,
 	t_min TimePrecisionRem = SysTime.QuadPart % (Sleep100NS);
 	ui64 LogIters = 0;
 
-	LARGE_INTEGER QueryFreq;
-	QueryPerformanceFrequency(&QueryFreq);
-	LARGE_INTEGER ProcBegin = {}, ProcEnd = {};
+	t_file QueryFreq;
+	QueryPerformanceFrequency((LARGE_INTEGER *)&QueryFreq);
+	t_file ProcBegin = {}, ProcEnd = {};
 
 	// Add a stamp, since we need to know when activity logging started again.
 	{
@@ -620,7 +632,7 @@ int __stdcall main(HINSTANCE hInstance,
 		AddStamp(LogFile, StampFile, CurTime);
 	}
 
-	QueryPerformanceCounter(&ProcBegin);
+	QueryPerformanceCounter((LARGE_INTEGER *)&ProcBegin);
 	WholeProgramBegin = ProcBegin;
 
 	activity_info CurA;
@@ -654,8 +666,8 @@ int __stdcall main(HINSTANCE hInstance,
 
 		if(CurA != NextA)
 		{
-			QueryPerformanceCounter(&ProcEnd);
-			LARGE_INTEGER NextProcBegin = ProcEnd;
+			QueryPerformanceCounter((LARGE_INTEGER *)&ProcEnd);
+			t_file NextProcBegin = ProcEnd;
 
 			// TODO: What about when the active program switched multiple times after the user became idle?
 			/*
@@ -667,9 +679,9 @@ int __stdcall main(HINSTANCE hInstance,
 			*/
 			if(NextA.Type == AT_Idle)
 			{
-				t_min AddedIdleTime = IdleTime * QueryFreq.QuadPart;
-				ProcEnd.QuadPart -= AddedIdleTime;
-				NextProcBegin.QuadPart -= AddedIdleTime;
+				t_min AddedIdleTime = IdleTime * QueryFreq;
+				ProcEnd -= AddedIdleTime;
+				NextProcBegin -= AddedIdleTime;
 			}
 
 			LogActivity(LogFile, Symbols,
@@ -712,8 +724,8 @@ int __stdcall main(HINSTANCE hInstance,
 					strcpy(InfoBuf, "Time Switch");
 #endif
 
-					QueryPerformanceCounter(&ProcEnd);
-					LARGE_INTEGER NextProcBegin = ProcEnd;
+					QueryPerformanceCounter((LARGE_INTEGER *)&ProcEnd);
+					t_file NextProcBegin = ProcEnd;
 					LogActivity(LogFile, Symbols,
 											GetActivityTitle(CurA), "Time Division Interrupt", CurA.ProcessName, InfoBuf,
 											CurA.Type, NextA.Type,
@@ -731,9 +743,9 @@ int __stdcall main(HINSTANCE hInstance,
 			{
 #ifdef DEBUG
 				{
-					QueryPerformanceCounter(&ProcEnd);
-					Assert(ProcBegin.QuadPart < ProcEnd.QuadPart);
-					t_min TimeSinceActSwitch = (ProcEnd.QuadPart - ProcBegin.QuadPart) / QueryFreq.QuadPart;
+					QueryPerformanceCounter((LARGE_INTEGER *)&ProcEnd);
+					Assert(ProcBegin < ProcEnd);
+					t_min TimeSinceActSwitch = (ProcEnd - ProcBegin) / QueryFreq;
 					TimeSinceActSwitch /= TMinToTFile;
 					Assert(TimeSinceActSwitch <= TimeDivS);
 				}
@@ -751,12 +763,12 @@ int __stdcall main(HINSTANCE hInstance,
 				*/
 				FILETIME TimeNowFile;
 				GetSystemTimeAsFileTime(&TimeNowFile);
-				ULARGE_INTEGER TimeNow{TimeNowFile.dwLowDateTime, TimeNowFile.dwHighDateTime};
+				t_file TimeNow = ULARGE_INTEGER{TimeNowFile.dwLowDateTime, TimeNowFile.dwHighDateTime}.QuadPart;
 
-				t_min TimeRem = TimeNow.QuadPart % Sleep100NS;
+				t_file TimeRem = TimeNow % Sleep100NS;
 				Assert(TimeRem < TMIN_MAX);
 				t_min_d TimeCorrection = ((t_min_d)(TimeRem - TimePrecisionRem) / TMinToTFile);
-				t_min_d TotalTimeError = (t_min_d)(TimeNow.QuadPart / TMinToTFile) - ((SysTime.QuadPart + LogIters++ * SleepS * TMinToTFile) / TMinToTFile);
+				t_min_d TotalTimeError = (t_min_d)(TimeNow / TMinToTFile) - ((SysTime.QuadPart + LogIters++ * SleepS * TMinToTFile) / TMinToTFile);
 
 				persist bool LastWasError = false;
 				if(TotalTimeError < SleepS)
@@ -767,7 +779,7 @@ int __stdcall main(HINSTANCE hInstance,
 				}
 				else
 				{
-					// TODO TEMP: Remove
+					// TODO FIX: Stop assertion from firing
 					//UNHANDLED_CODE_PATH;
 					int x = 0;
 					x = x;
@@ -776,9 +788,10 @@ int __stdcall main(HINSTANCE hInstance,
 		}
 	}
 
-	t_min TotalProgramTime = ((t_min)(WholeProgramEnd.QuadPart - WholeProgramBegin.QuadPart) / (t_min)QueryFreq.QuadPart);
+	t_min TotalProgramTime = ((t_min)(WholeProgramEnd - WholeProgramBegin) / (t_min)QueryFreq);
 	t_min_d TimeError = TotalProgramTime - AccumTimeS;
-	Assert(abs(TimeError) < 0.2f); // TODO: Fix time-precision problems (including ASSURE_TIME_PRECISION())
+	Assert(abs(TimeError) < 1); // TODO: Fix time-precision problems (including ASSURE_TIME_PRECISION())
+	Assert(TimeErrorCount == 0);
 
 #if WHAT_DO == DO_GRAPH
 	Assert(WaitForSingleObject(ThreadHnd, 1000) != WAIT_TIMEOUT);
@@ -791,6 +804,8 @@ int __stdcall main(HINSTANCE hInstance,
 
 	CloseHandle(LogFile);
 	CloseHandle(Symbols.SymFile);
+
+	CoUninitialize();
 
 	return 0;
 }
@@ -969,8 +984,7 @@ DWORD WINAPI NotifIconThread(void *Args)
 		time_graph_data &GraphData = WD.TimeGraphData;
 		FILETIME FTNow;
 		GetSystemTimeAsFileTime(&FTNow);
-		// TODO FIX: At large zoom values, scrolling out makes everything go right instead of expand equally in both directions.
-		GraphData.Center = 19655000; // (ULARGE_INTEGER{FTNow.dwLowDateTime, FTNow.dwHighDateTime}.QuadPart - YearBegin2020) / TMinToTFile;
+		GraphData.Center = (ULARGE_INTEGER{FTNow.dwLowDateTime, FTNow.dwHighDateTime}.QuadPart - YearBegin2020) / TMinToTFile;
 		GraphData.Zoom = 6;
 		GraphData.ScrollSensitivity = 48;
 	}
@@ -1140,13 +1154,14 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 		}
 		break;
 
-		case WM_KEYUP:
+		// TODO: Use smooth, continuous movement instead of autorepeat?
 		case WM_KEYDOWN:
 		{
 			bool Down = (Msg == WM_KEYDOWN);
 			if(W == 'A' || W == 'D')
 			{
 				ui64 ScrollAmount = MIN(MAX(tgd.Zoom / tgd.ScrollSensitivity, 1) * TimeDivS, (ui64)tgd.Center);
+
 				if(W == 'A')
 				{
 					tgd.Center -= ScrollAmount;
@@ -1196,10 +1211,6 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 			glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
 			glDisable(GL_DEPTH);
 
-			// 8/10/2020 16 14 5   17 55 44
-			//ui64 StartDate = CreateTimestamp(2020, 8, 10, 15, 0, 5);
-			//ui64 EndDate = CreateTimestamp(2020, 8, 10, 17, 55, 44);
-
 			t_min StartDate = MAX((t_min_d)tgd.Center - (t_min_d)(tgd.Zoom * TimeDivS), 0);
 			StartDate = (StartDate / TimeDivS) * TimeDivS;
 			t_min EndDate = tgd.Center + tgd.Zoom * TimeDivS;
@@ -1208,7 +1219,7 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 			typedef struct stamp_info
 			{
 				// The marker which points to an activity in the main log file.
-				ui64 Marker;
+				byte_mark Marker;
 				// The time at which that activity started.
 				t_min Time;
 			} stamp_info;
@@ -1228,13 +1239,13 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 				char *FilePos = StpBuf;
 
 				t_min LastStpDate = 0;
-				ui64 LastStpMarker = 0;
+				byte_mark LastStpMarker = 0;
 				ui64 LogFileSize = GetFileSize32(LogFile);
 				while((ui64)(FilePos - StpBuf) < StpFileSize)
 				{
 					t_min StpDate = strtoull(FilePos, &FilePos, 10);
 					char *StpMarkerStr = strchr(FilePos, ' ') + 1;
-					ui64 StpMarker = strtoull(StpMarkerStr, 0, 10);
+					byte_mark StpMarker = ParseByteMarker(StpMarkerStr);
 
 					Assert(LastStpMarker <= StpMarker);
 					Assert(LastStpDate <= StpDate);
@@ -1302,12 +1313,11 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 						RangeStamps.push_back({LogFileSize, LastStpDate});
 					}
 				}
-
-				PAINT_EXPECT(RangeStamps.size());
 			}
 
 			t_div TotalHours = (t_div)(EndDate / TimeDivS - StartDate / TimeDivS);
-			TotalHours = MIN(TotalHours, 256);
+			Assert(TotalHours < 65536);
+			TotalHours = MIN(TotalHours, 65536);
 			// TODO: Instead of reserving memory for all programs, how about instead inserting to some type of map and allocating dynamically?
 			const ui32 TotalProgs = GetProgramsCount();
 
@@ -1315,125 +1325,138 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 			ActivityTimes = (t_min *)malloc(ActivityLen * sizeof(t_min));
 			memset(ActivityTimes, 0, ActivityLen * sizeof(t_min));
 
-			ui64 StartMarker = RangeStamps.front().Marker, EndMarker = RangeStamps.back().Marker;
-			ui32 FileRangeSize = (ui32)(EndMarker - StartMarker);
-			PAINT_EXPECT(FileRangeSize > 0);
-
 			// Process the activities to make presentable data out of them.
+			if(RangeStamps.size())
 			{
-				// There must be at least two timestamps, since otherwise this doesn't represent a range.
-				Assert(RangeStamps.size() >= 2);
+				byte_mark StartMarker = RangeStamps.front().Marker, EndMarker = RangeStamps.back().Marker;
+				size_t FileRangeSize = (size_t)(EndMarker - StartMarker);
 
-				// Start date must be before the second stamp, since the stamp is included in the range (other way around for end date).
-				Assert(StartDate <= RangeStamps[1].Time);
-				Assert((RangeStamps.end() - 2)->Time <= EndDate);
-
-				char *LogBuf;
+				if(FileRangeSize)
 				{
-					LARGE_INTEGER FilePointer;
-					FilePointer.QuadPart = StartMarker;
-					Assert(SetFilePointerEx(LogFile, FilePointer, 0, FILE_BEGIN) != INVALID_SET_FILE_POINTER);
-					file_result FileResult;
-					LogBuf = (char *)ReadFileContents(LogFile, FileRangeSize, &FileResult);
-					CloseFile(LogFile);
-					Assert(FileResult == file_result::Success);
-				}
+					// There must be at least two timestamps, since otherwise this doesn't represent a range.
+					Assert(RangeStamps.size() >= 2);
 
-				char *LogPos = LogBuf;
-				i32 NextStp = 0;
-				stamp_info NextStpInfo = RangeStamps[NextStp];
-				t_div CurHour = 0;
+					// Start date must be before the second stamp, since the stamp is included in the range (other way around for end date).
+					Assert(StartDate <= RangeStamps[1].Time);
+					Assert((RangeStamps.end() - 2)->Time <= EndDate);
 
-				t_min_d TimeUntilStartDate = (StartDate - RangeStamps.front().Time);
-				// TODO NOW: Is this necessary if we only allow hour granularity?
-				t_min_d TimeUntilEndDate = (RangeStamps.back().Time - EndDate);
-
-				i32 ASym = INT32_MAX;
-				t_min ATime = 0;
-				// Move forward until we reach the date at which we want to start.
-				// TODO NOW: Is this necessary if we only allow hour granularity?
-				//while(true)
-				//{
-				//	TimeUntilStartDate -= (ui64)(ATime * TMinToTFile);
-				//	if(TimeUntilStartDate <= 0)
-				//	{
-				//		if(TimeUntilStartDate < 0 && ATime)
-				//		{
-				//			uint AHIndex = ASym * TotalHours + CurHour;
-				//			ActivityTimes[AHIndex] += -TimeUntilStartDate;
-				//		}
-				//		break;
-				//	}
-
-				//	char *NextPos;
-				//	if(!(NextPos = ParseActivity(LogPos, &ASym, &ATime)))
-				//	{
-				//		UNHANDLED_CODE_PATH;
-				//		break;
-				//	}
-				//	LogPos = NextPos;
-				//}
-
-				while(LogPos >= LogBuf && ((ptrdiff_t)LogPos - (ptrdiff_t)LogBuf) < FileRangeSize)
-				{
-					while(NextStpInfo.Marker <= (StartMarker + (LogPos - LogBuf)))
+					char *LogBuf;
 					{
-						// TODO: This assumes that TimeDivS is the same as when this was recorded? Is that ok?
-						CurHour = (t_div)((NextStpInfo.Time) / TimeDivS - StartDate / TimeDivS);
-						NextStp++;
-						if(NextStp == RangeStamps.size())
+						ui64 FilePointer = StartMarker;
+						Assert(SetFilePointerEx(LogFile, *(LARGE_INTEGER *)&FilePointer, 0, FILE_BEGIN) != INVALID_SET_FILE_POINTER);
+						file_result FileResult;
+						LogBuf = (char *)ReadFileContents(LogFile, (ui32)FileRangeSize, &FileResult);
+						CloseFile(LogFile);
+						Assert(FileResult == file_result::Success);
+					}
+					char *LogPos = LogBuf;
+
+					t_min_d TimeUntilStartDate = (StartDate - RangeStamps.front().Time);
+					byte_mark BytesUntilSecStamp = RangeStamps[1].Marker - RangeStamps[0].Marker;
+					// TODO NOW: Is this necessary if we only allow hour granularity?
+					t_min_d TimeUntilEndDate = (RangeStamps.back().Time - EndDate);
+
+					i32 ASym = INT32_MAX;
+					t_min ATime = 0;
+					// Move forward until we reach the date at which we want to start (we know that the start date lies between the 1st and 2nd stamp).
+					// TODO NOW: Is this necessary if we only allow hour granularity?
+					while(true)
+					{
+						TimeUntilStartDate -= (ui64)ATime;
+						if(TimeUntilStartDate <= 0)
 						{
+							// TODO FIX: Check for bugs (and if this is even necessary).
+							// If we passed the date where we needed to start, add the amount of time we passed since the start date to the activity which contains that time.
+							if(ASym != INT32_MAX)
+							{
+								uint AHIndex = (uint)(ASym * TotalHours + 0);
+								ActivityTimes[AHIndex] += -TimeUntilStartDate;
+							}
+							break;
+						}
+
+						char *NextPos;
+						if(!(NextPos = ParseActivity(LogPos, &ASym, &ATime)))
+						{
+							UNHANDLED_CODE_PATH;
 							goto DataCollectionFinish;
 						}
-						// TODO TEMP: Temporary (use TimeUntilEndDate instead)
-						if(CurHour == TotalHours)
+						LogPos = NextPos;
+						ASym += 1;
+
+						/*
+						If we reached the next stamp without getting to the start date (which is between the 1st and 2nd stamp), 
+						that means that the time between the 1st and 2nd stamp is larger than a time division, which was probably
+						caused by the program being interrupted in-between. In that case we just start at the next stamp.
+					*/
+						if((byte_mark)(LogPos - LogBuf) >= BytesUntilSecStamp)
 						{
-							goto DataCollectionFinish;
+							break;
 						}
-						NextStpInfo = RangeStamps[NextStp];
 					}
 
-					if(!(LogPos = ParseActivity(LogPos, &ASym, &ATime)))
-					{
-						UNHANDLED_CODE_PATH;
-						break;
-					}
-					ASym += 1; // + 1, since indices start at -1 (idle).
+					ui32 NextStp = 0;
+					// TODO FIX: Check for bugs (and if this is even necessary).
+					RangeStamps[0] = stamp_info{RangeStamps[NextStp].Marker + (LogPos - LogBuf), StartDate};
+					stamp_info NextStpInfo = RangeStamps[NextStp];
+					t_div CurHour = 0;
+					t_min CurTime = 0;
 
-					if((ui32)ASym < TotalProgs)
+					while(LogPos >= LogBuf && (size_t)(LogPos - LogBuf) < FileRangeSize)
 					{
+						while(NextStpInfo.Marker <= (StartMarker + (LogPos - LogBuf)))
+						{
+							// TODO: This assumes that TimeDivS is the same as when this was recorded? Is that ok?
+							CurTime = NextStpInfo.Time;
+							CurHour = (t_div)((NextStpInfo.Time) / TimeDivS - StartDate / TimeDivS);
+							Assert(CurHour >= 0);
+							NextStp++;
+							if(NextStp == RangeStamps.size())
+							{
+								goto DataCollectionFinish;
+							}
+							// TODO TEMP: Temporary (use TimeUntilEndDate instead)
+							if(CurHour == TotalHours)
+							{
+								goto DataCollectionFinish;
+							}
+							NextStpInfo = RangeStamps[NextStp];
+						}
+
+						if(!(LogPos = ParseActivity(LogPos, &ASym, &ATime)))
+						{
+							UNHANDLED_CODE_PATH;
+							break;
+						}
+						Assert((ui32)ASym < TotalProgs);
+						ASym += 1; // + 1, since indices start at -1 (== idle).
+
 						uint AHIndex = (uint)(ASym * TotalHours + CurHour);
-						ActivityTimes[AHIndex] += ATime;
-						Assert(AHIndex < ActivityLen);
-						// TODO FIX: Activity time is sometimes larger than division time (precision problem) [remove "+ 1.0f" after fix]. Possibly because time is updated (expanded) _before_ time division check.
-						NoAssert(ActivityTimes[AHIndex] <= TimeDivS + 1.0f);
-						// TODO TEMP: Remove
-						ActivityTimes[AHIndex] = MIN(ActivityTimes[AHIndex], TimeDivS + 1);
-					}
-				}
-			DataCollectionFinish:
+						{
+							ActivityTimes[AHIndex] += ATime;
+							Assert(AHIndex < ActivityLen);
+							// TODO FIX: Activity time is sometimes larger than division time (precision problem) [remove "+ 1.0f" after fix]. Possibly because time is updated (expanded) _before_ time division check.
+							NoAssert(ActivityTimes[AHIndex] <= TimeDivS + 1.0f);
+							// TODO TEMP: Remove
+							ActivityTimes[AHIndex] = MIN(ActivityTimes[AHIndex], TimeDivS + 1);
+						}
 
-				FreeFileContents(LogBuf);
+						CurTime += ATime;
+						if(CurTime >= EndDate)
+						{
+							// Reclaim the time that we added to the activity that came after the end date.
+							ActivityTimes[AHIndex] -= (CurTime - EndDate);
+							Assert(ActivityTimes[AHIndex] > 0);
+						}
+					}
+				DataCollectionFinish:
+
+					FreeFileContents(LogBuf);
+				}
 			}
 			FreeFileContents(StpBuf);
 
-			// Find the largest spike in the graph for normalization.
-			// TODO NOW: TO t_min!!!!!!!
-			f64 LargestTime = 0;
-			for(uint h = 0; h < (uint)TotalHours; h++)
-			{
-				f64 AccumTime = 0;
-				for(uint p = 0; p < TotalProgs; p++)
-				{
-					AccumTime += ActivityTimes[p * TotalHours + h];
-				}
-				LargestTime = MAX(LargestTime, AccumTime);
-			}
-
-			if(LargestTime < FLT_EPSILON)
-				Assert(RangeStamps.size() == 0);
-			LargestTime = MIN(LargestTime, TimeDivS);
-
+			// Normalize all times and add them together to create a "stacked mountain" time graph.
 			NormActTimes = (f32 *)malloc(ActivityLen * sizeof(f32));
 			memset(NormActTimes, 0, ActivityLen * sizeof(f32));
 			for(uint h = 0; h < (uint)TotalHours; h++)
@@ -1442,7 +1465,7 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 				{
 					uint Index = h * TotalProgs + p;
 					Assert(Index < ActivityLen);
-					NormActTimes[Index] = (f32)(ActivityTimes[p * TotalHours + h] / LargestTime * 2.0f - 1.0f);
+					NormActTimes[Index] = ((f32)ActivityTimes[p * TotalHours + h] / (f32)TimeDivS * 2.0f - 1.0f);
 					if(p != 0)
 						NormActTimes[Index] += NormActTimes[Index - 1] + 1.0f;
 
@@ -1461,18 +1484,21 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 
 			srand(1);
 			uint uColorLoc = glGetUniformLocation(tgd.CalProg, "uColor");
-			for(size_t p = 0; p < TotalProgs; p++)
+			v2 *Points = (v2 *)malloc(TotalHours * 2 * sizeof(v2));
+			glBindBuffer(GL_ARRAY_BUFFER, tgd.VBO);
+			glBufferData(GL_ARRAY_BUFFER, sizeof(v2) * TotalHours * 2, 0, GL_DYNAMIC_DRAW);
+			for(uint p = 0; p < TotalProgs; p++)
 			{
 				// TODO FUTURE: Space out all colors, also space them out from background and special colors (like black, magenta?).
 				// TODO FUTURE: If an 'Other' section is added, make it light gray or some boring color.
-				f32 Color[3];
-				for(size_t i = 0; i < 3; i++)
+				f32 Color[4];
+				for(uint i = 0; i < 3; i++)
 				{
 					Color[i] = (f32)rand() / RAND_MAX;
 				}
-				glUniform3fv(uColorLoc, 1, Color);
+				Color[3] = 1.0f;
+				glUniform4fv(uColorLoc, 1, Color);
 
-				std::vector<v2> Points(TotalHours * 2);
 				for(uint h = 0; h < (uint)TotalHours; h++)
 				{
 					f32 x = ((f32)h / (TotalHours - 1)) * 2.0f - 1.0f;
@@ -1483,9 +1509,27 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 					Points[2 * h + 1] = {x, NormActTimes[h * TotalProgs + p]};
 				}
 
-				glBindBuffer(GL_ARRAY_BUFFER, tgd.VBO);
-				glBufferData(GL_ARRAY_BUFFER, sizeof(v2) * TotalHours * 2, &Points[0], GL_STATIC_DRAW);
+				glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(v2) * TotalHours * 2, Points);
 				glDrawArrays(GL_TRIANGLE_STRIP, 0, (uint)TotalHours * 2);
+			}
+			free(Points);
+
+			// Draw date lines
+			{
+				glEnable(GL_BLEND);
+				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+				const f32 Color[4] = {0, 0, 0, 0.3f};
+				glUniform4fv(uColorLoc, 1, Color);
+				// TODO: Line width based on DPI
+				glLineWidth(1);
+				for(int h = 0; h <= TotalHours; h++)
+				{
+					f32 x = ((f32)h / (f32)(TotalHours - 1)) * 2.0f - 1.0f;
+					v2 LinePts[2] = {{x, -1.0f}, {x, 1.0f}};
+					glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(LinePts), LinePts);
+					glDrawArrays(GL_LINES, 0, 2);
+				}
+				glDisable(GL_BLEND);
 			}
 
 			RECT ClientRect;

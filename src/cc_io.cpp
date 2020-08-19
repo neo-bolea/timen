@@ -127,14 +127,13 @@ GetFileSize32(HANDLE File)
 	return (ui32)FileSize64.QuadPart;
 }
 
-// TODO: Change FileBytesRead to (u)i64?
 internal file_result
-ReadFileContents(void *FileHandle, void *Buffer, i32 BytesToRead)
+ReadFileContents(void *FileHandle, void *Buffer, ui32 BytesToRead)
 {
 	DWORD FileBytesRead;
 	file_result Result;
 	Result = (file_result)ReadFile(FileHandle, Buffer, BytesToRead, &FileBytesRead, 0);
-	if(Result == file_result::Success && (i32)FileBytesRead != BytesToRead)
+	if(Result == file_result::Success && (ui32)FileBytesRead != BytesToRead)
 	{
 		Result = file_result::EndOfFile;
 	}
@@ -142,14 +141,13 @@ ReadFileContents(void *FileHandle, void *Buffer, i32 BytesToRead)
 }
 
 internal void *
-ReadFileContents(void *FileHandle, i32 BytesToRead, file_result *Result)
+ReadFileContents(void *FileHandle, ui32 BytesToRead, file_result *Result)
 {
 	void *Buffer = VirtualAlloc(0, BytesToRead, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 	*Result = ReadFileContents(FileHandle, Buffer, BytesToRead);
 	return Buffer;
 }
 
-// TODO: Change FileBytesWritten to (u)i64?
 internal bool
 WriteFileContents(void *FileHandle, void *Buffer, i32 BytesToWrite)
 {

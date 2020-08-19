@@ -173,6 +173,9 @@ LoadGLFunctions()
 	LOAD_GLAD_FUNC(glClear);
 	LOAD_GLAD_FUNC(glClearColor);
 
+	LOAD_GLAD_FUNC(glBlendFunc);
+	LOAD_GLAD_FUNC(glLineWidth);
+
 	FreeLibrary(GLModule);
 }
 
