@@ -47,33 +47,41 @@ StrStrRFind(char *Str, const char *SubStr, size_t StrLen = (size_t)-1, size_t Su
 	return 0;
 }
 
-internal void
+internal int
 WidenUTF(wchar_t *Dst, i32 DstLen, const char *Src)
 {
-	Assert(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, Src, -1, Dst, DstLen));
+	int Result = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, Src, -1, Dst, DstLen);
+	Assert(Result);
+	return Result;
 }
 
 internal wchar_t *
-WidenUTFAlloc(const char *Str)
+WidenUTFAlloc(const char *Str, int *OutSize = 0)
 {
 	i32 ReqSize = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, Str, -1, 0, 0);
 	wchar_t *Res = (wchar_t *)malloc(ReqSize);
-	WidenUTF(Res, ReqSize, Str);
+	int Size = WidenUTF(Res, ReqSize, Str);
+	if(OutSize)
+		*OutSize = Size;
 	return Res;
 }
 
-internal void
+internal int
 NarrowUTF(char *Dst, i32 DstLen, wchar_t *Src)
 {
-	Assert(WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Src, -1, Dst, DstLen, 0, 0));
+	int Result = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Src, -1, Dst, DstLen, 0, 0);
+	Assert(Result);
+	return Result;
 }
 
 internal char *
-NarrowUTFAlloc(wchar_t *Str)
+NarrowUTFAlloc(wchar_t *Str, int *OutSize = 0)
 {
 	i32 ReqSize = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Str, -1, 0, 0, 0, 0);
 	char *Res = (char *)malloc(ReqSize);
-	NarrowUTF(Res, ReqSize, Str);
+	int Size = NarrowUTF(Res, ReqSize, Str);
+	if(OutSize)
+		*OutSize = Size;
 	return Res;
 }
 
