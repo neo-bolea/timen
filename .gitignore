@@ -3,3 +3,7 @@ build/
 LogExample1.sym
 LogExample1.txt
 examples/
+*.el
+Log.txt
+Log.sym
+Log.stp
