@@ -93,6 +93,7 @@ LoadGLFunctions()
 	LOAD_GLAD_FUNC(glGetIntegerv);
 	LOAD_GLAD_FUNC(glDisable);
 	LOAD_GLAD_FUNC(glEnable);
+	LOAD_GLAD_FUNC(glPolygonMode);
 
 	LOAD_GLAD_FUNC(glViewport);
 
@@ -268,4 +269,75 @@ HGLRC InitOpenGL(HDC DC)
 	wglDeleteContext(DummyContext);
 
 	return GraphicsContext;
+}
+
+// TODO FIX: Memory leak?
+void InitTimeGraphGL(time_graph_data &tgd, t_div Hours)
+{
+	if(tgd.VAO)
+	{
+		glDeleteBuffers(1, &tgd.VBO);
+		glDeleteVertexArrays(1, &tgd.VAO);
+	}
+	else
+	{
+		CreateProgramFromPaths(tgd.CalProg, "time_prog.vert", "time_prog.frag");
+		CreateProgramFromPaths(tgd.FBProg, "framebuffer.vert", "framebuffer.frag");
+	}
+
+	{
+		glGenVertexArrays(1, &tgd.VAO);
+		glGenBuffers(1, &tgd.VBO);
+
+		glBindVertexArray(tgd.VAO);
+		{
+			glBindBuffer(GL_ARRAY_BUFFER, tgd.VBO);
+			glBufferData(GL_ARRAY_BUFFER, sizeof(v2) * Hours * 2, 0, GL_STATIC_DRAW);
+			glVertexAttribPointer(0, 2, GL_FLOAT, false, sizeof(v2), 0);
+			glEnableVertexAttribArray(0);
+		}
+		glBindVertexArray(0);
+	}
+
+	if(!tgd.QuadVAO)
+	{
+		uint QuadVBOs[2];
+		glGenVertexArrays(1, &tgd.QuadVAO);
+		glGenBuffers(2, QuadVBOs);
+
+		glBindVertexArray(tgd.QuadVAO);
+		{
+			v2 QuadVerts[6] =
+					{
+							{-1.0f, -1.0f},
+							{1.0f, -1.0f},
+							{1.0f, 1.0f},
+
+							{-1.0f, -1.0f},
+							{1.0f, 1.0f},
+							{-1.0f, 1.0f},
+					};
+			v2 QuadUVs[6] =
+					{
+							{0.0f, 0.0f},
+							{1.0f, 0.0f},
+							{1.0f, 1.0f},
+
+							{0.0f, 0.0f},
+							{1.0f, 1.0f},
+							{0.0f, 1.0f},
+					};
+
+			glBindBuffer(GL_ARRAY_BUFFER, QuadVBOs[0]);
+			glBufferData(GL_ARRAY_BUFFER, sizeof(QuadVerts), QuadVerts, GL_STATIC_DRAW);
+			glVertexAttribPointer(0, 2, GL_FLOAT, false, sizeof(v2), 0);
+			glEnableVertexAttribArray(0);
+
+			glBindBuffer(GL_ARRAY_BUFFER, QuadVBOs[1]);
+			glBufferData(GL_ARRAY_BUFFER, sizeof(QuadUVs), QuadUVs, GL_STATIC_DRAW);
+			glVertexAttribPointer(1, 2, GL_FLOAT, false, sizeof(v2), 0);
+			glEnableVertexAttribArray(1);
+		}
+		glBindVertexArray(0);
+	}
 }
