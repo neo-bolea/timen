@@ -36,3 +36,17 @@ Opportunity: Since past activities never change, their calculations could be cac
 	- Adds complexity
 	- Needs to be recalculated if any behaviour of the program is reconfigured (e.g. if from now on, program A should be ignored on Mondays, then we would need to recalculate everything [or only the necessary stuff, but that sounds very difficult])
 	=> Will only be implemented if optimization is necessary!
+	
+		
+Gathering more activity details:
+	At the moment, only the active window's exe process and window title are stored. While this might be enough information in certain scenarios, for most scenarios the amount of information is lacking. Almost all information that can be gathered on a program is specific to that program, and only the title and process name is what they have in common. 
+	
+	So the only solution is to change behaviour based on the program in question. This process can be split in two parts: gathering information, and processing information.
+	Especially the gathering part could be difficult to implement, since gathering is only done once, and can never be 'refined' afterwards (since the recording was in the past). That means that we can never assume that what data is gathered for a given program is the same over the whole timespan, since the gathering behaviour in regards to that program might have changed in-between. So forwards-compatibilty is an issue (backwards-compatibility can be ignored since updating is trivially easy).
+	The processing part is much easier, as processing the given information has to be done every time the data is visualized anyway. Of course, if processed information is cached, that would make it harder, since we would need to know when cached data has to be updated.
+	
+	Depending on how the dynamic behaviour is to be done, implementing it might be very easy or very hard. If the only interface for dynamic behaviour is in the form of external (DLL) code, it would be very easy to implement. But if a typical user is to be able to change the program's gathering/processing behaviour, that would mean that we would be responsible to make the interface as flexible and robust as possible (and would probably take as long to implement as the whole program has so far).
+	For now, dynamic behaviour will only be allowed in code form, as the alternative is orders of magnitude more complex.
+	
+	There's also the question of whether the behaviour should be dynamic to begin with. At the moment, I can only come up with one example: saving the domain name when browsing the internet. Another example - which I haven't seen in real life - is a game client that launches games. Timen might record the game client's exe instead of the game's, in which case the behaviour would also need to be changed (as otherwise we wouldn't know what game was played, only the client).
+	Since the examples in favor of adding dynamic behaviour are lacking, it will not be implemented. Instead, the architecture will be written in a way to allow this feature to be implemented in the future, if necessary.
