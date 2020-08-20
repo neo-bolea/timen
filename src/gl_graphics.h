@@ -1,6 +1,6 @@
 #include "glad/glad.h"
 #include "glad/glad_wgl.h"
-#include "cc_gl.cpp"
+#include "cc_gl.h"
 
 global uint MSRenderBuf, MSColorTex, MSFrameBuf;
 global uint IntermTex, IntermFrameBuf;

@@ -94,8 +94,8 @@ typedef struct v2
 	f32 x, y;
 } v2;
 
-#include "cc_char.cpp"
-#include "cc_io.cpp"
+#include "cc_char.h"
+#include "cc_io.h"
 
 #define ParseLogTime(...) atof(__VA_ARGS__)
 #define P_TMIN PRIi64
@@ -126,9 +126,9 @@ typedef struct timen_cfg
 	t_min DivTime = 100;
 };
 
-#include "stamps.cpp"
-#include "proc_sym.cpp"
-#include "activities.cpp"
+#include "stamps.h"
+#include "proc_sym.h"
+#include "activities.h"
 
 std::atomic_bool Running = true;
 
@@ -151,7 +151,7 @@ t_file GetYear2020()
 
 #define WHAT_DO DO_GRAPH
 
-#include "ui.cpp"
+#include "ui.h"
 
 int __stdcall main(HINSTANCE hInstance,
 									 HINSTANCE hPrevInstance,

@@ -33,7 +33,7 @@ void UpdateWindowSize(win_data &WD, HWND Wnd, WPARAM W, LPARAM L)
 LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L);
 LRESULT CALLBACK WndProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L);
 
-#include "gl_graphics.cpp"
+#include "gl_graphics.h"
 
 #define WM_USER_SHELLICON WM_USER + 1
 #define IDM_EXIT WM_USER + 2
@@ -212,19 +212,6 @@ LRESULT CALLBACK WndProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 	}
 
 	return Result;
-}
-
-typedef struct act_map_block
-{
-	f32 Activities[64];
-};
-
-void MapInsertAct()
-{
-}
-
-void GetMapAct()
-{
 }
 
 LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
