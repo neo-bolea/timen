@@ -98,7 +98,6 @@ typedef struct v2
 #include "cc_io.cpp"
 
 #define ParseLogTime(...) atof(__VA_ARGS__)
-#define ParseByteMarker(Str) strtoull(Str, 0, 10)
 #define P_TMIN PRIi64
 #define TMIN_MAX INT32_MAX
 
@@ -107,6 +106,9 @@ typedef i64 t_min_d;
 typedef i64 t_div; // Time division (e.g. hour)
 typedef i64 t_div_d;
 typedef ui64 t_file; // Used by win32
+
+// Windows FileTime is in 100 nanoseconds intervals
+const t_min TMinToTFile = 10000000;
 
 t_file GetYear2020();
 typedef struct timen_cfg
@@ -124,13 +126,11 @@ typedef struct timen_cfg
 	t_min DivTime = 100;
 };
 
+#include "stamps.cpp"
 #include "proc_sym.cpp"
 #include "activities.cpp"
 
 std::atomic_bool Running = true;
-
-// Windows FileTime is in 100 nanoseconds intervals
-const t_min TMinToTFile = 10000000;
 
 t_file GetYear2020()
 {
@@ -144,36 +144,6 @@ t_file GetYear2020()
 	YearBegin2020L.LowPart = FileTime2020.dwLowDateTime;
 	YearBegin2020L.HighPart = FileTime2020.dwHighDateTime;
 	return YearBegin2020L.QuadPart;
-}
-
-void StampToTimeStr(const timen_cfg &tcfg, char *Buf, size_t BufLen, t_min Time)
-{
-	SYSTEMTIME SysTime;
-	ULARGE_INTEGER Time64;
-	Time64.QuadPart = Time * TMinToTFile + tcfg.GlobalTimeBegin;
-	FILETIME FileTime, LocalFileTime;
-	FileTime.dwLowDateTime = Time64.LowPart;
-	FileTime.dwHighDateTime = Time64.HighPart;
-	FileTimeToLocalFileTime(&FileTime, &LocalFileTime);
-	FileTimeToSystemTime(&LocalFileTime, &SysTime);
-	ui32 TimeDivLen = sprintf_s(Buf, BufLen, "%i/%i/%i, %ih:%im:%is",
-															SysTime.wMonth, SysTime.wDay, SysTime.wYear, SysTime.wHour, SysTime.wMinute, SysTime.wSecond);
-}
-
-void AddStamp(const timen_cfg &tcfg, HANDLE LogFile, HANDLE StampFile, t_min Time)
-{
-	char TimeDivBuf[255], StampBuf[255];
-	LARGE_INTEGER LastActivityEnd;
-	Assert(GetFileSizeEx(LogFile, &LastActivityEnd));
-#ifdef DEBUG
-	StampToTimeStr(tcfg, StampBuf, ArrLen(StampBuf), Time);
-	ui32 TimeDivLen = sprintf_s(TimeDivBuf, "%llu %llu [%s]%s", Time, LastActivityEnd.QuadPart, StampBuf, EOLStr);
-#else
-	ui32 TimeDivLen = sprintf_s(TimeDivBuf, "%llu %llu%s", Time, LastActivityEnd.QuadPart, EOLStr);
-#endif
-	DWORD BytesWritten;
-	Assert(SetFilePointer(StampFile, 0, 0, FILE_END) != INVALID_SET_FILE_POINTER);
-	Assert(WriteFile(StampFile, TimeDivBuf, TimeDivLen, &BytesWritten, 0) && BytesWritten == TimeDivLen);
 }
 
 #define DO_LOG 1

@@ -1,5 +1,3 @@
-typedef ui64 byte_mark;
-
 typedef struct time_graph_data
 {
 	uint VAO, VBO, CalProg;
@@ -17,28 +15,6 @@ typedef struct win_data
 	time_graph_data TimeGraphData;
 	timen_cfg *tcfg;
 } win_data;
-
-t_min CreateTimestamp(timen_cfg &tcfg, uint Year, uint Month = 0, uint Day = 0, uint Hour = 0, uint Minute = 0, uint Second = 0)
-{
-	SYSTEMTIME SysTime = {};
-	SysTime.wYear = (WORD)Year;
-	SysTime.wMonth = (WORD)Month;
-	SysTime.wDay = (WORD)Day;
-	SysTime.wHour = (WORD)Hour;
-	SysTime.wMinute = (WORD)Minute;
-	SysTime.wSecond = (WORD)Second;
-
-	TIME_ZONE_INFORMATION TimeZone;
-	GetTimeZoneInformation(&TimeZone);
-
-	FILETIME LocFileTime, FileTime;
-	LocalSystemTimeToLocalFileTime(&TimeZone, &SysTime, &LocFileTime);
-	LocalFileTimeToFileTime(&LocFileTime, &FileTime);
-
-	t_min ResultTime = ULARGE_INTEGER{FileTime.dwLowDateTime, FileTime.dwHighDateTime}.QuadPart;
-	Assert((t_file)ResultTime >= tcfg.GlobalTimeBegin);
-	return (ResultTime - tcfg.GlobalTimeBegin) / TMinToTFile;
-}
 
 void UpdateWindowSize(win_data &WD, HWND Wnd, WPARAM W, LPARAM L)
 {
@@ -58,8 +34,6 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L);
 LRESULT CALLBACK WndProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L);
 
 #include "gl_graphics.cpp"
-// TODO NOW: Remove
-#include <vector>
 
 #define WM_USER_SHELLICON WM_USER + 1
 #define IDM_EXIT WM_USER + 2
@@ -305,21 +279,6 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 			time_graph_data &tgd = WD->TimeGraphData;
 			timen_cfg &tcfg = *WD->tcfg;
 
-#define PAINT_EXPECT_ASS(Expr) \
-	if(!(Expr))                  \
-	{                            \
-		UNDEFINED_CODE_PATH;       \
-		goto PaintFailure;         \
-	}                            \
-	0
-
-#define PAINT_EXPECT(Expr) \
-	if(!(Expr))              \
-	{                        \
-		goto PaintFailure;     \
-	}                        \
-	0
-
 			t_min *ActivityTimes = 0;
 			f32 *NormActTimes = 0;
 
@@ -334,108 +293,20 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 			t_min EndDate = tgd.Center + tgd.Zoom * tcfg.DivTime;
 			EndDate = (EndDate / tcfg.DivTime + 1) * tcfg.DivTime;
 
-			typedef struct stamp_info
-			{
-				// The marker which points to an activity in the main log file.
-				byte_mark Marker;
-				// The time at which that activity started.
-				t_min Time;
-			} stamp_info;
-
-			// Find the range of the file where the activities to collect are.
-			// TODO NOW: Some type of read/write protection or other mechanism, since main thread already writes to the file.
-			bool FoundStart = false, FoundEnd = false, IsStart = false;
-			ui64 StpFileSize;
-			char *StpBuf = (char *)LoadFileContents(tcfg.StampFilename, &StpFileSize);
-			void *LogFile = OpenFile(tcfg.LogFilename, FA_Read, FS_All);
-			// TODO: Show the whole time range, not only the bounding range of the valid values!
-			// Includes all timestamps in the requested range, but also the two timestamps before and after.
-			std::vector<stamp_info> RangeStamps;
-			{
-				PAINT_EXPECT_ASS(StartDate < EndDate);
-
-				char *FilePos = StpBuf;
-
-				t_min LastStpDate = 0;
-				byte_mark LastStpMarker = 0;
-				ui64 LogFileSize = GetFileSize32(LogFile);
-				while((ui64)(FilePos - StpBuf) < StpFileSize)
-				{
-					t_min StpDate = strtoull(FilePos, &FilePos, 10);
-					char *StpMarkerStr = strchr(FilePos, ' ') + 1;
-					byte_mark StpMarker = ParseByteMarker(StpMarkerStr);
-
-					Assert(LastStpMarker <= StpMarker);
-					Assert(LastStpDate <= StpDate);
-
-					if(!FoundStart)
-					{
-						if(StpDate > StartDate)
-						{
-							Assert(!LastStpDate || LastStpDate <= StartDate);
-							FoundStart = true;
-							IsStart = true;
-							FilePos++;
-
-							if(LastStpDate)
-							{
-								RangeStamps.push_back({LastStpMarker, LastStpDate});
-							}
-							else
-							{
-								RangeStamps.push_back({StpMarker, StpDate});
-							}
-						}
-					}
-
-					if(FoundStart)
-					{
-						// Only add the stamp if it wasn't the first one in the file, as otherwise we have already added it.
-						if(!IsStart || LastStpDate)
-						{
-							RangeStamps.push_back({StpMarker, StpDate});
-						}
-						else
-						{
-							IsStart = false;
-						}
-
-						if(StpDate >= EndDate)
-						{
-							if(!AfterNextEOL(StpMarkerStr))
-							{
-								// TODO TRIVIAL: Necessary?
-								// End of file, set the end of range at the end of file.
-								RangeStamps.push_back({LogFileSize, LastStpDate});
-							}
-							FoundEnd = true;
-							break;
-						}
-					}
-
-					FilePos = AfterNextEOL(StpMarkerStr);
-					LastStpDate = StpDate;
-					LastStpMarker = StpMarker;
-				}
-
-				// If the time window is outside the given range, there should not be any stamps added.
-				if(!FoundStart)
-				{
-					Assert(RangeStamps.size() == 0);
-				}
-				else if(!FoundEnd)
-				{
-					// TODO REFACTOR: Clean up.
-					if(RangeStamps.back().Marker != LogFileSize)
-					{
-						RangeStamps.push_back({LogFileSize, LastStpDate});
-					}
-				}
-			}
-
 			t_div TotalHours = (t_div)(EndDate / tcfg.DivTime - StartDate / tcfg.DivTime);
 			Assert(TotalHours < 65536);
 			TotalHours = MIN(TotalHours, 65536);
+
+			// Find the range of the file where the activities to collect are.
+			// TODO NOW: Some type of read/write protection or other mechanism, since main thread already writes to the file.
+			ui64 StpFileSize;
+			char *StpBuf = (char *)LoadFileContents(tcfg.StampFilename, &StpFileSize);
+			void *LogFile = OpenFile(tcfg.LogFilename, FA_Read, FS_All);
+			ui64 LogFileSize = GetFileSize32(LogFile);
+			// TODO: Show the whole time range, not only the bounding range of the valid values!
+			// Includes all timestamps in the requested range, but also the two timestamps before and after.
+			stamp_range RangeStamps = GetTimeStampsInRange(StpBuf, StpFileSize, LogFileSize, StartDate, EndDate);
+
 			// TODO: Instead of reserving memory for all programs, how about instead inserting to some type of map and allocating dynamically?
 			const ui32 TotalProgs = GetProcSymCount(tcfg);
 
@@ -444,19 +315,19 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 			memset(ActivityTimes, 0, ActivityLen * sizeof(t_min));
 
 			// Process the activities to make presentable data out of them.
-			if(RangeStamps.size())
+			if(RangeStamps.Size)
 			{
-				byte_mark StartMarker = RangeStamps.front().Marker, EndMarker = RangeStamps.back().Marker;
+				byte_mark StartMarker = RangeStamps[0].Marker, EndMarker = RangeStamps[RangeStamps.Size - 1].Marker;
 				size_t FileRangeSize = (size_t)(EndMarker - StartMarker);
 
 				if(FileRangeSize)
 				{
 					// There must be at least two timestamps, since otherwise this doesn't represent a range.
-					Assert(RangeStamps.size() >= 2);
+					Assert(RangeStamps.Size >= 2);
 
 					// Start date must be before the second stamp, since the stamp is included in the range (other way around for end date).
 					Assert(StartDate <= RangeStamps[1].Time);
-					Assert((RangeStamps.end() - 2)->Time <= EndDate);
+					Assert(RangeStamps[RangeStamps.Size - 2].Time <= EndDate);
 
 					char *LogBuf;
 					{
@@ -469,10 +340,8 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 					}
 					char *LogPos = LogBuf;
 
-					t_min_d TimeUntilStartDate = (StartDate - RangeStamps.front().Time);
+					t_min_d TimeUntilStartDate = (StartDate - RangeStamps[0].Time);
 					byte_mark BytesUntilSecStamp = RangeStamps[1].Marker - RangeStamps[0].Marker;
-					// TODO NOW: Is this necessary if we only allow hour granularity?
-					t_min_d TimeUntilEndDate = (RangeStamps.back().Time - EndDate);
 
 					i32 ASym = INT32_MAX;
 					t_min ATime = 0;
@@ -513,6 +382,9 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 						}
 					}
 
+					// TODO NOW: Is this necessary if we only allow hour granularity?
+					t_min_d TimeUntilEndDate = (RangeStamps[RangeStamps.Size - 1].Time - EndDate);
+
 					ui32 NextStp = 0;
 					// TODO FIX: Check for bugs (and if this is even necessary).
 					RangeStamps[0] = stamp_info{RangeStamps[NextStp].Marker + (LogPos - LogBuf), StartDate};
@@ -529,7 +401,7 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 							CurHour = (t_div)((NextStpInfo.Time) / tcfg.DivTime - StartDate / tcfg.DivTime);
 							Assert(CurHour >= 0);
 							NextStp++;
-							if(NextStp == RangeStamps.size())
+							if(NextStp == RangeStamps.Size)
 							{
 								goto DataCollectionFinish;
 							}
@@ -674,14 +546,7 @@ LRESULT CALLBACK TimeMainGraphProc(HWND Wnd, UINT Msg, WPARAM W, LPARAM L)
 			glBindTexture(GL_TEXTURE_2D, IntermTex);
 			glDrawArrays(GL_TRIANGLES, 0, 6);
 
-			goto PaintExit;
-			{
-			PaintFailure:
-				glBindFramebuffer(GL_FRAMEBUFFER, 0);
-				glClear(GL_COLOR_BUFFER_BIT);
-			}
-		PaintExit:
-
+			FreeStampRange(RangeStamps);
 			if(ActivityTimes)
 				free(ActivityTimes);
 			if(NormActTimes)
